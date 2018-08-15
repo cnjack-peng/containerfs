@@ -318,17 +318,18 @@ errDeal:
 
 func (m *Master) createVol(w http.ResponseWriter, r *http.Request) {
 	var (
-		name       string
-		err        error
-		msg        string
-		volType    string
-		replicaNum int
+		name        string
+		err         error
+		msg         string
+		volType     string
+		randomWrite bool
+		replicaNum  int
 	)
 
-	if name, volType, replicaNum, err = parseCreateVolPara(r); err != nil {
+	if name, volType, replicaNum, randomWrite, err = parseCreateVolPara(r); err != nil {
 		goto errDeal
 	}
-	if err = m.cluster.createVol(name, volType, uint8(replicaNum)); err != nil {
+	if err = m.cluster.createVol(name, volType, uint8(replicaNum), randomWrite); err != nil {
 		goto errDeal
 	}
 	msg = fmt.Sprintf("create vol[%v] successed\n", name)
@@ -701,8 +702,9 @@ func parseDeleteVolPara(r *http.Request) (name string, err error) {
 	return checkVolPara(r)
 }
 
-func parseCreateVolPara(r *http.Request) (name, volType string, replicaNum int, err error) {
+func parseCreateVolPara(r *http.Request) (name, volType string, replicaNum int, randomWrite bool, err error) {
 	r.ParseForm()
+	var randomWriteValue string
 	if name, err = checkVolPara(r); err != nil {
 		return
 	}
@@ -713,6 +715,15 @@ func parseCreateVolPara(r *http.Request) (name, volType string, replicaNum int, 
 		err = UnMatchPara
 	}
 	if volType, err = parseDataPartitionType(r); err != nil {
+		return
+	}
+
+	if randomWriteValue = r.FormValue(ParaRandomWrite); randomWriteValue == "" {
+		err = paraNotFound(ParaRandomWrite)
+		return
+	}
+
+	if randomWrite, err = strconv.ParseBool(randomWriteValue); err != nil {
 		return
 	}
 	return

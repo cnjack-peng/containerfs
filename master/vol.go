@@ -24,6 +24,7 @@ import (
 type Vol struct {
 	Name           string
 	VolType        string
+	RandomWrite    bool
 	dpReplicaNum   uint8
 	mpReplicaNum   uint8
 	threshold      float32
@@ -34,8 +35,9 @@ type Vol struct {
 	sync.RWMutex
 }
 
-func NewVol(name, volType string, replicaNum uint8) (vol *Vol) {
+func NewVol(name, volType string, replicaNum uint8, randomWrite bool) (vol *Vol) {
 	vol = &Vol{Name: name, VolType: volType, MetaPartitions: make(map[uint64]*MetaPartition, 0)}
+	vol.RandomWrite = randomWrite
 	vol.dataPartitions = NewDataPartitionMap(name)
 	vol.dpReplicaNum = replicaNum
 	vol.threshold = DefaultMetaPartitionThreshold
@@ -111,7 +113,7 @@ func (vol *Vol) checkDataPartitions(c *Cluster) (readWriteDataPartitions int) {
 				c.dataPartitionOffline(addr, vol.Name, dp, CheckDataPartitionDiskErrorErr)
 			}
 		}
-		tasks := dp.checkReplicationTask()
+		tasks := dp.checkReplicationTask(vol.RandomWrite)
 		c.putDataNodeTasks(tasks)
 	}
 	return

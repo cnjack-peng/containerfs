@@ -23,12 +23,13 @@ import (
 	"github.com/tiglabs/containerfs/util/ump"
 )
 
-func newCreateDataPartitionRequest(partitionType, volName string, ID uint64) (req *proto.CreateDataPartitionRequest) {
+func newCreateDataPartitionRequest(partitionType, volName string, ID uint64, randomWrite bool) (req *proto.CreateDataPartitionRequest) {
 	req = &proto.CreateDataPartitionRequest{
 		PartitionType: partitionType,
 		PartitionId:   ID,
 		PartitionSize: util.DefaultDataPartitionSize,
 		VolumeId:      volName,
+		RandomWrite:   randomWrite,
 	}
 	return
 }
