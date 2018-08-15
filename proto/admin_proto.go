@@ -33,6 +33,7 @@ type CreateDataPartitionRequest struct {
 	PartitionId   uint64
 	PartitionSize int
 	VolumeId      string
+	RandomWrite bool
 }
 
 type CreateDataPartitionResponse struct {

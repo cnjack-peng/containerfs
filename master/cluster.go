@@ -392,7 +392,7 @@ func (c *Cluster) createDataPartition(volName, partitionType string) (dp *DataPa
 	if err = c.syncAddDataPartition(volName, dp); err != nil {
 		goto errDeal
 	}
-	tasks = dp.GenerateCreateTasks()
+	tasks = dp.GenerateCreateTasks(vol.RandomWrite)
 	c.putDataNodeTasks(tasks)
 	vol.dataPartitions.putDataPartition(dp)
 
@@ -595,9 +595,9 @@ func (c *Cluster) delMetaNodeFromCache(metaNode *MetaNode) {
 	go metaNode.clean()
 }
 
-func (c *Cluster) createVol(name, volType string, replicaNum uint8) (err error) {
+func (c *Cluster) createVol(name, volType string, replicaNum uint8, randomWrite bool) (err error) {
 	var vol *Vol
-	if vol, err = c.createVolInternal(name, volType, replicaNum); err != nil {
+	if vol, err = c.createVolInternal(name, volType, replicaNum, randomWrite); err != nil {
 		goto errDeal
 	}
 
@@ -617,12 +617,12 @@ errDeal:
 	return
 }
 
-func (c *Cluster) createVolInternal(name, volType string, replicaNum uint8) (vol *Vol, err error) {
+func (c *Cluster) createVolInternal(name, volType string, replicaNum uint8, randomWrite bool) (vol *Vol, err error) {
 	if _, err = c.getVol(name); err == nil {
 		err = hasExist(name)
 		goto errDeal
 	}
-	vol = NewVol(name, volType, replicaNum)
+	vol = NewVol(name, volType, replicaNum, randomWrite)
 	if err = c.syncAddVol(vol); err != nil {
 		goto errDeal
 	}

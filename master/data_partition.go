@@ -66,16 +66,17 @@ func (partition *DataPartition) AddMember(replica *DataReplica) {
 	partition.Replicas = append(partition.Replicas, replica)
 }
 
-func (partition *DataPartition) GenerateCreateTasks() (tasks []*proto.AdminTask) {
+func (partition *DataPartition) GenerateCreateTasks(randomWrite bool) (tasks []*proto.AdminTask) {
 	tasks = make([]*proto.AdminTask, 0)
 	for _, addr := range partition.PersistenceHosts {
-		tasks = append(tasks, partition.generateCreateTask(addr))
+		tasks = append(tasks, partition.generateCreateTask(addr, randomWrite))
 	}
 	return
 }
 
-func (partition *DataPartition) generateCreateTask(addr string) (task *proto.AdminTask) {
-	task = proto.NewAdminTask(proto.OpCreateDataPartition, addr, newCreateDataPartitionRequest(partition.PartitionType, partition.VolName, partition.PartitionID))
+func (partition *DataPartition) generateCreateTask(addr string, randomWrite bool) (task *proto.AdminTask) {
+	task = proto.NewAdminTask(proto.OpCreateDataPartition, addr, newCreateDataPartitionRequest(partition.PartitionType,
+		partition.VolName, partition.PartitionID, randomWrite))
 	partition.resetTaskID(task)
 	return
 }

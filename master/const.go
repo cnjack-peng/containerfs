@@ -24,6 +24,7 @@ const (
 	ParaStart             = "start"
 	ParaEnable            = "enable"
 	ParaThreshold         = "threshold"
+	ParaRandomWrite       = "randomWrite"
 )
 
 const (

@@ -100,16 +100,18 @@ func newDataPartitionValue(dp *DataPartition) (dpv *DataPartitionValue) {
 }
 
 type VolValue struct {
-	VolType    string
-	ReplicaNum uint8
-	Status     uint8
+	VolType     string
+	ReplicaNum  uint8
+	Status      uint8
+	RandomWrite bool
 }
 
 func newVolValue(vol *Vol) (vv *VolValue) {
 	vv = &VolValue{
-		VolType:    vol.VolType,
-		ReplicaNum: vol.dpReplicaNum,
-		Status:     vol.Status,
+		VolType:     vol.VolType,
+		ReplicaNum:  vol.dpReplicaNum,
+		Status:      vol.Status,
+		RandomWrite: vol.RandomWrite,
 	}
 	return
 }
@@ -439,7 +441,7 @@ func (c *Cluster) applyAddVol(cmd *Metadata) {
 			log.LogError(fmt.Sprintf("action[applyAddVol] failed,err:%v", err))
 			return
 		}
-		vol := NewVol(keys[2], vv.VolType, vv.ReplicaNum)
+		vol := NewVol(keys[2], vv.VolType, vv.ReplicaNum, vv.RandomWrite)
 		c.putVol(vol)
 	}
 }
@@ -661,7 +663,7 @@ func (c *Cluster) loadVols() (err error) {
 			err = fmt.Errorf("action[loadVols],value:%v,err:%v", encodedValue.Data(), err)
 			return err
 		}
-		vol := NewVol(volName, vv.VolType, vv.ReplicaNum)
+		vol := NewVol(volName, vv.VolType, vv.ReplicaNum, vv.RandomWrite)
 		vol.Status = vv.Status
 		c.putVol(vol)
 		encodedKey.Free()

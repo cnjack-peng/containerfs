@@ -142,7 +142,7 @@ func (partition *DataPartition) checkDiskError(clusterID string) (diskErrorAddrs
 	return
 }
 
-func (partition *DataPartition) checkReplicationTask() (tasks []*proto.AdminTask) {
+func (partition *DataPartition) checkReplicationTask(randomWrite bool) (tasks []*proto.AdminTask) {
 	var msg string
 	tasks = make([]*proto.AdminTask, 0)
 	if excessAddr, task, excessErr := partition.deleteExcessReplication(); excessErr != nil {
@@ -156,7 +156,7 @@ func (partition *DataPartition) checkReplicationTask() (tasks []*proto.AdminTask
 	if partition.Status == proto.ReadWrite {
 		return
 	}
-	if lackTask, lackAddr, lackErr := partition.addLackReplication(); lackErr != nil {
+	if lackTask, lackAddr, lackErr := partition.addLackReplication(randomWrite); lackErr != nil {
 		tasks = append(tasks, lackTask)
 		msg = fmt.Sprintf("action[%v], partitionID:%v  Lack Replication"+
 			" On :%v  Err:%v  PersistenceHosts:%v  new task to create DataReplica",
@@ -191,7 +191,7 @@ func (partition *DataPartition) deleteExcessReplication() (excessAddr string, ta
 
 /*add data partition lack replication,range all RocksDBHost if Hosts not in Replicas,
 then generator a task to OpRecoverCreateDataPartition to a new Node*/
-func (partition *DataPartition) addLackReplication() (t *proto.AdminTask, lackAddr string, err error) {
+func (partition *DataPartition) addLackReplication(randomWrite bool) (t *proto.AdminTask, lackAddr string, err error) {
 	partition.Lock()
 	defer partition.Unlock()
 	for _, addr := range partition.PersistenceHosts {
@@ -200,7 +200,7 @@ func (partition *DataPartition) addLackReplication() (t *proto.AdminTask, lackAd
 				partition.PartitionID, addr))
 			err = DataReplicaLackError
 			lackAddr = addr
-			t = partition.generateCreateTask(addr)
+			t = partition.generateCreateTask(addr, randomWrite)
 			partition.isRecover = true
 			break
 		}
