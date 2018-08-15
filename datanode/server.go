@@ -32,6 +32,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/tiglabs/containerfs/master"
 	"github.com/tiglabs/containerfs/proto"
+	"github.com/tiglabs/containerfs/raftstore"
 	"github.com/tiglabs/containerfs/storage"
 	"github.com/tiglabs/containerfs/util"
 	"github.com/tiglabs/containerfs/util/config"
@@ -55,6 +56,7 @@ var (
 const (
 	GetIpFromMaster = master.AdminGetIp
 	DefaultRackName = "huitian_rack1"
+	DefaultRaftDir  = "raft"
 )
 
 const (
@@ -62,11 +64,14 @@ const (
 )
 
 const (
-	ConfigKeyPort       = "port"       // int
-	ConfigKeyClusterID  = "clusterID"  // string
-	ConfigKeyMasterAddr = "masterAddr" // array
-	ConfigKeyRack       = "rack"       // string
-	ConfigKeyDisks      = "disks"      // array
+	ConfigKeyPort          = "port"          // int
+	ConfigKeyClusterID     = "clusterID"     // string
+	ConfigKeyMasterAddr    = "masterAddr"    // array
+	ConfigKeyRack          = "rack"          // string
+	ConfigKeyDisks         = "disks"         // array
+	ConfigKeyRaftDir       = "raftDir"       // string
+	ConfigKeyRaftHeartbeat = "raftHeartbeat" // string
+	ConfigKeyRaftReplicate = "raftReplicate" // string
 )
 
 type DataNode struct {
@@ -76,6 +81,11 @@ type DataNode struct {
 	clusterId      string
 	localIp        string
 	localServeAddr string
+	nodeId         uint64
+	raftDir        string
+	raftHeartbeat  string
+	raftReplicate  string
+	raftStore      raftstore.RaftStore
 	tcpListener    net.Listener
 	stopC          chan bool
 	state          uint32
@@ -134,6 +144,7 @@ func (s *DataNode) onStart(cfg *config.Config) (err error) {
 	}
 
 	go s.registerToMaster()
+
 	ump.InitUmp(UmpModuleName)
 	return
 }
@@ -141,6 +152,7 @@ func (s *DataNode) onStart(cfg *config.Config) (err error) {
 func (s *DataNode) onShutdown() {
 	close(s.stopC)
 	s.stopTcpService()
+	s.stopRaftServer()
 	return
 }
 
@@ -169,6 +181,7 @@ func (s *DataNode) parseConfig(cfg *config.Config) (err error) {
 	if s.rackName == "" {
 		s.rackName = DefaultRackName
 	}
+
 	log.LogDebugf("action[parseConfig] load masterAddrs[%v].", MasterHelper.Nodes())
 	log.LogDebugf("action[parseConfig] load port[%v].", s.port)
 	log.LogDebugf("action[parseConfig] load clusterId[%v].", s.clusterId)
@@ -214,7 +227,7 @@ func (s *DataNode) registerToMaster() {
 		err  error
 		data []byte
 	)
-	// Get IP address and cluster ID from master.
+	// Get IP address and cluster ID and node ID from master.
 	for {
 		timer := time.NewTimer(0)
 		select {
@@ -247,6 +260,9 @@ func (s *DataNode) registerToMaster() {
 					masterAddr, err)
 				continue
 			}
+
+			//TODO: need get nodeId from master response
+			//s.startRaftServer(cfg)
 			return
 		case <-s.stopC:
 			timer.Stop()
