@@ -345,16 +345,17 @@ errDeal:
 func (m *Master) addDataNode(w http.ResponseWriter, r *http.Request) {
 	var (
 		nodeAddr string
+		id       uint64
 		err      error
 	)
 	if nodeAddr, err = parseAddDataNodePara(r); err != nil {
 		goto errDeal
 	}
 
-	if err = m.cluster.addDataNode(nodeAddr); err != nil {
+	if id, err = m.cluster.addDataNode(nodeAddr); err != nil {
 		goto errDeal
 	}
-	io.WriteString(w, fmt.Sprintf("addDataNode %v successed\n", nodeAddr))
+	io.WriteString(w, fmt.Sprintf("%v", id))
 	return
 errDeal:
 	logMsg := getReturnMessage("addDataNode", r.RemoteAddr, err.Error(), http.StatusBadRequest)

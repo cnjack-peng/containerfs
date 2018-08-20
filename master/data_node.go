@@ -35,6 +35,7 @@ type DataNode struct {
 	Total                     uint64 `json:"TotalWeight"`
 	Used                      uint64 `json:"UsedWeight"`
 	Available                 uint64
+	Id                        uint64
 	RackName                  string `json:"Rack"`
 	Addr                      string
 	ReportTime                time.Time

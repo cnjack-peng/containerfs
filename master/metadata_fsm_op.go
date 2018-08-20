@@ -284,18 +284,18 @@ func (c *Cluster) syncDeleteMetaNode(metaNode *MetaNode) (err error) {
 	return c.submit(metadata)
 }
 
-//key=#dn#httpAddr,value = nil
+//key=#dn#id#httpAddr,value = nil
 func (c *Cluster) syncAddDataNode(dataNode *DataNode) (err error) {
 	metadata := new(Metadata)
 	metadata.Op = OpSyncAddDataNode
-	metadata.K = DataNodePrefix + dataNode.Addr
+	metadata.K = DataNodePrefix + strconv.FormatUint(dataNode.Id, 10) + KeySeparator + dataNode.Addr
 	return c.submit(metadata)
 }
 
 func (c *Cluster) syncDeleteDataNode(dataNode *DataNode) (err error) {
 	metadata := new(Metadata)
 	metadata.Op = OpSyncDeleteDataNode
-	metadata.K = DataNodePrefix + dataNode.Addr
+	metadata.K = DataNodePrefix + strconv.FormatUint(dataNode.Id, 10) + KeySeparator + dataNode.Addr
 	return c.submit(metadata)
 }
 
@@ -404,9 +404,16 @@ func (c *Cluster) applyDeleteMetaNode(cmd *Metadata) {
 func (c *Cluster) applyAddDataNode(cmd *Metadata) {
 	log.LogInfof("action[applyAddDataNode] cmd:%v", cmd.K)
 	keys := strings.Split(cmd.K, KeySeparator)
-
+	var (
+		id  uint64
+		err error
+	)
 	if keys[1] == DataNodeAcronym {
-		dataNode := NewDataNode(keys[2], c.Name)
+		dataNode := NewDataNode(keys[3], c.Name)
+		if id, err = strconv.ParseUint(keys[2], 10, 64); err != nil {
+			return
+		}
+		dataNode.Id = id
 		c.dataNodes.Store(dataNode.Addr, dataNode)
 	}
 }
@@ -601,11 +608,23 @@ func (c *Cluster) loadDataNodes() (err error) {
 
 	for ; it.ValidForPrefix(prefixKey); it.Next() {
 		encodedKey := it.Key()
-		keys := strings.Split(string(encodedKey.Data()), KeySeparator)
-		dataNode := NewDataNode(keys[2], c.Name)
+		nodeID, addr, err1 := c.decodeMetaNodeKey(string(encodedKey.Data()))
+		if err1 != nil {
+			err = fmt.Errorf("action[loadDataNodes] err:%v", err1.Error())
+			return err
+		}
+		dataNode := NewDataNode(addr, c.Name)
+		dataNode.Id = nodeID
 		c.dataNodes.Store(dataNode.Addr, dataNode)
 		encodedKey.Free()
 	}
+	return
+}
+
+func (c *Cluster) decodeDataNodeKey(key string) (nodeID uint64, addr string, err error) {
+	keys := strings.Split(key, KeySeparator)
+	addr = keys[3]
+	nodeID, err = strconv.ParseUint(keys[2], 10, 64)
 	return
 }
 

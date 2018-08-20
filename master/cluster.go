@@ -290,23 +290,29 @@ errDeal:
 	return
 }
 
-func (c *Cluster) addDataNode(nodeAddr string) (err error) {
+func (c *Cluster) addDataNode(nodeAddr string) (id uint64, err error) {
 	var dataNode *DataNode
-	if _, ok := c.dataNodes.Load(nodeAddr); ok {
-		return
+	if node, ok := c.dataNodes.Load(nodeAddr); ok {
+		dataNode = node.(*DataNode)
+		return dataNode.Id, nil
 	}
 
 	dataNode = NewDataNode(nodeAddr, c.Name)
+	//allocate dataNode id
+	if id, err = c.idAlloc.allocateMetaNodeID(); err != nil {
+		goto errDeal
+	}
 	if err = c.syncAddDataNode(dataNode); err != nil {
 		goto errDeal
 	}
+	dataNode.Id = id
 	c.dataNodes.Store(nodeAddr, dataNode)
 	return
 errDeal:
 	err = fmt.Errorf("action[addMetaNode],clusterID[%v] dataNodeAddr:%v err:%v ", c.Name, nodeAddr, err.Error())
 	log.LogError(errors.ErrorStack(err))
 	Warn(c.Name, err.Error())
-	return err
+	return
 }
 
 func (c *Cluster) getDataPartitionByID(partitionID uint64) (dp *DataPartition, err error) {
