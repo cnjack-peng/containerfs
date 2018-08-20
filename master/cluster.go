@@ -381,24 +381,26 @@ func (c *Cluster) createDataPartition(volName, partitionType string) (dp *DataPa
 		partitionID uint64
 		tasks       []*proto.AdminTask
 		targetHosts []string
+		targetPeers []proto.Peer
 	)
 	c.createDpLock.Lock()
 	defer c.createDpLock.Unlock()
 	if vol, err = c.getVol(volName); err != nil {
 		goto errDeal
 	}
-	if targetHosts, err = c.ChooseTargetDataHosts(int(vol.dpReplicaNum)); err != nil {
+	if targetHosts, targetPeers, err = c.ChooseTargetDataHosts(int(vol.dpReplicaNum)); err != nil {
 		goto errDeal
 	}
 	if partitionID, err = c.idAlloc.allocateDataPartitionID(); err != nil {
 		goto errDeal
 	}
-	dp = newDataPartition(partitionID, vol.dpReplicaNum, partitionType, volName)
+	dp = newDataPartition(partitionID, vol.dpReplicaNum, partitionType, volName, vol.RandomWrite)
 	dp.PersistenceHosts = targetHosts
+	dp.Peers = targetPeers
 	if err = c.syncAddDataPartition(volName, dp); err != nil {
 		goto errDeal
 	}
-	tasks = dp.GenerateCreateTasks(vol.RandomWrite)
+	tasks = dp.GenerateCreateTasks()
 	c.putDataNodeTasks(tasks)
 	vol.dataPartitions.putDataPartition(dp)
 
@@ -410,28 +412,31 @@ errDeal:
 	return
 }
 
-func (c *Cluster) ChooseTargetDataHosts(replicaNum int) (hosts []string, err error) {
+func (c *Cluster) ChooseTargetDataHosts(replicaNum int) (hosts []string, peers []proto.Peer, err error) {
 	var (
-		masterAddr []string
-		addrs      []string
-		racks      []*Rack
-		rack       *Rack
+		masterAddr  []string
+		addrs       []string
+		racks       []*Rack
+		rack        *Rack
+		masterPeers []proto.Peer
+		slavePeers  []proto.Peer
 	)
 	hosts = make([]string, 0)
+	peers = make([]proto.Peer, 0)
 	if c.t.isSingleRack() {
 		var newHosts []string
 		if rack, err = c.t.getRack(c.t.racks[0]); err != nil {
-			return nil, errors.Trace(err)
+			return nil, nil, errors.Trace(err)
 		}
-		if newHosts, err = rack.getAvailDataNodeHosts(hosts, replicaNum); err != nil {
-			return nil, errors.Trace(err)
+		if newHosts, peers, err = rack.getAvailDataNodeHosts(hosts, replicaNum); err != nil {
+			return nil, nil, errors.Trace(err)
 		}
 		hosts = newHosts
 		return
 	}
 
 	if racks, err = c.t.allocRacks(replicaNum, nil); err != nil {
-		return nil, errors.Trace(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	if len(racks) == 2 {
@@ -439,25 +444,29 @@ func (c *Cluster) ChooseTargetDataHosts(replicaNum int) (hosts []string, err err
 		slaveRack := racks[1]
 		masterReplicaNum := replicaNum/2 + 1
 		slaveReplicaNum := replicaNum - masterReplicaNum
-		if masterAddr, err = masterRack.getAvailDataNodeHosts(hosts, masterReplicaNum); err != nil {
-			return nil, errors.Trace(err)
+		if masterAddr, masterPeers, err = masterRack.getAvailDataNodeHosts(hosts, masterReplicaNum); err != nil {
+			return nil, nil, errors.Trace(err)
 		}
 		hosts = append(hosts, masterAddr...)
-		if addrs, err = slaveRack.getAvailDataNodeHosts(hosts, slaveReplicaNum); err != nil {
-			return nil, errors.Trace(err)
+		peers = append(peers, masterPeers...)
+		if addrs, slavePeers, err = slaveRack.getAvailDataNodeHosts(hosts, slaveReplicaNum); err != nil {
+			return nil, nil, errors.Trace(err)
 		}
 		hosts = append(hosts, addrs...)
+		peers = append(peers, slavePeers...)
 	} else if len(racks) == replicaNum {
 		for index := 0; index < replicaNum; index++ {
 			rack := racks[index]
-			if addrs, err = rack.getAvailDataNodeHosts(hosts, 1); err != nil {
-				return nil, errors.Trace(err)
+			var selectPeers []proto.Peer
+			if addrs, selectPeers, err = rack.getAvailDataNodeHosts(hosts, 1); err != nil {
+				return nil, nil, errors.Trace(err)
 			}
 			hosts = append(hosts, addrs...)
+			peers = append(peers, selectPeers...)
 		}
 	}
 	if len(hosts) != replicaNum {
-		return nil, NoAnyDataNodeForCreateDataPartition
+		return nil, nil, NoAnyDataNodeForCreateDataPartition
 	}
 	return
 }
@@ -513,6 +522,7 @@ func (c *Cluster) dataPartitionOffline(offlineAddr, volName string, dp *DataPart
 	var (
 		newHosts []string
 		newAddr  string
+		newPeers []proto.Peer
 		msg      string
 		tasks    []*proto.AdminTask
 		task     *proto.AdminTask
@@ -549,11 +559,16 @@ func (c *Cluster) dataPartitionOffline(offlineAddr, volName string, dp *DataPart
 	if rack, err = c.t.getRack(dataNode.RackName); err != nil {
 		goto errDeal
 	}
-	if newHosts, err = rack.getAvailDataNodeHosts(dp.PersistenceHosts, 1); err != nil {
+	if newHosts, newPeers, err = rack.getAvailDataNodeHosts(dp.PersistenceHosts, 1); err != nil {
 		goto errDeal
 	}
 	newAddr = newHosts[0]
-	if err = dp.updateForOffline(offlineAddr, newAddr, volName, c); err != nil {
+	for _, replica := range dp.Replicas {
+		if replica.Addr != offlineAddr {
+			newPeers = append(newPeers, proto.Peer{ID: replica.dataNode.Id, Addr: replica.Addr})
+		}
+	}
+	if err = dp.updateForOffline(offlineAddr, newAddr, volName, newPeers, c); err != nil {
 		goto errDeal
 	}
 	dp.offLineInMem(offlineAddr)

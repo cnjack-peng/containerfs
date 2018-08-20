@@ -86,7 +86,9 @@ type DataPartitionValue struct {
 	PartitionID   uint64
 	ReplicaNum    uint8
 	Hosts         string
+	Peers         []bsProto.Peer
 	PartitionType string
+	RandomWrite   bool
 }
 
 func newDataPartitionValue(dp *DataPartition) (dpv *DataPartitionValue) {
@@ -94,7 +96,9 @@ func newDataPartitionValue(dp *DataPartition) (dpv *DataPartitionValue) {
 		PartitionID:   dp.PartitionID,
 		ReplicaNum:    dp.ReplicaNum,
 		Hosts:         dp.HostsToString(),
+		Peers:         dp.Peers,
 		PartitionType: dp.PartitionType,
+		RandomWrite:   dp.RandomWrite,
 	}
 	return
 }
@@ -528,8 +532,9 @@ func (c *Cluster) applyAddDataPartition(cmd *Metadata) {
 		dpv := &DataPartitionValue{}
 		json.Unmarshal(cmd.V, dpv)
 		vol, _ := c.getVol(keys[2])
-		dp := newDataPartition(dpv.PartitionID, dpv.ReplicaNum, dpv.PartitionType, vol.Name)
+		dp := newDataPartition(dpv.PartitionID, dpv.ReplicaNum, dpv.PartitionType, vol.Name, vol.RandomWrite)
 		dp.PersistenceHosts = strings.Split(dpv.Hosts, UnderlineSeparator)
+		dp.Peers = dpv.Peers
 		vol.dataPartitions.putDataPartitionByRaft(dp)
 	}
 }
@@ -545,8 +550,9 @@ func (c *Cluster) applyUpdateDataPartition(cmd *Metadata) {
 			log.LogError(fmt.Sprintf("action[applyUpdateDataPartition] failed,err:%v", err))
 			return
 		}
-		dp := newDataPartition(dpv.PartitionID, dpv.ReplicaNum, dpv.PartitionType, vol.Name)
+		dp := newDataPartition(dpv.PartitionID, dpv.ReplicaNum, dpv.PartitionType, vol.Name, dpv.RandomWrite)
 		dp.PersistenceHosts = strings.Split(dpv.Hosts, UnderlineSeparator)
+		dp.Peers = dpv.Peers
 		vol.dataPartitions.putDataPartitionByRaft(dp)
 	}
 }
@@ -750,9 +756,10 @@ func (c *Cluster) loadDataPartitions() (err error) {
 			err = fmt.Errorf("action[decodeDataPartitionValue],value:%v,err:%v", encodedValue.Data(), err)
 			return err
 		}
-		dp := newDataPartition(dpv.PartitionID, dpv.ReplicaNum, dpv.PartitionType, volName)
+		dp := newDataPartition(dpv.PartitionID, dpv.ReplicaNum, dpv.PartitionType, volName, dpv.RandomWrite)
 		dp.Lock()
 		dp.PersistenceHosts = strings.Split(dpv.Hosts, UnderlineSeparator)
+		dp.Peers = dpv.Peers
 		dp.Unlock()
 		vol.dataPartitions.putDataPartition(dp)
 		encodedKey.Free()

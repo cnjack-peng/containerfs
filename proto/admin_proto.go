@@ -34,6 +34,7 @@ type CreateDataPartitionRequest struct {
 	PartitionSize int
 	VolumeId      string
 	RandomWrite bool
+	Members     []Peer
 }
 
 type CreateDataPartitionResponse struct {
@@ -46,6 +47,8 @@ type DeleteDataPartitionRequest struct {
 	DataPartitionType string
 	PartitionId       uint64
 	PartitionSize     int
+	Members []Peer
+	offlineAddr string
 }
 
 type DeleteDataPartitionResponse struct {

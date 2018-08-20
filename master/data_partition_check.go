@@ -200,7 +200,7 @@ func (partition *DataPartition) addLackReplication(randomWrite bool) (t *proto.A
 				partition.PartitionID, addr))
 			err = DataReplicaLackError
 			lackAddr = addr
-			t = partition.generateCreateTask(addr, randomWrite)
+			t = partition.generateCreateTask(addr)
 			partition.isRecover = true
 			break
 		}
