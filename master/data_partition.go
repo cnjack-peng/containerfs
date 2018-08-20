@@ -35,25 +35,29 @@ type DataPartition struct {
 	Replicas         []*DataReplica
 	PartitionType    string
 	PersistenceHosts []string
+	Peers            []proto.Peer
 	sync.RWMutex
 	total         uint64
 	used          uint64
 	FileInCoreMap map[string]*FileInCore
 	MissNodes     map[string]int64
 	VolName       string
+	RandomWrite   bool
 }
 
-func newDataPartition(ID uint64, replicaNum uint8, partitionType, volName string) (partition *DataPartition) {
+func newDataPartition(ID uint64, replicaNum uint8, partitionType, volName string, randomWrite bool) (partition *DataPartition) {
 	partition = new(DataPartition)
 	partition.ReplicaNum = replicaNum
 	partition.PartitionID = ID
 	partition.PartitionType = partitionType
 	partition.PersistenceHosts = make([]string, 0)
+	partition.Peers = make([]proto.Peer, 0)
 	partition.Replicas = make([]*DataReplica, 0)
 	partition.FileInCoreMap = make(map[string]*FileInCore, 0)
 	partition.MissNodes = make(map[string]int64)
 	partition.Status = proto.ReadOnly
 	partition.VolName = volName
+	partition.RandomWrite = randomWrite
 	return
 }
 
@@ -66,23 +70,28 @@ func (partition *DataPartition) AddMember(replica *DataReplica) {
 	partition.Replicas = append(partition.Replicas, replica)
 }
 
-func (partition *DataPartition) GenerateCreateTasks(randomWrite bool) (tasks []*proto.AdminTask) {
+func (partition *DataPartition) GenerateCreateTasks() (tasks []*proto.AdminTask) {
 	tasks = make([]*proto.AdminTask, 0)
 	for _, addr := range partition.PersistenceHosts {
-		tasks = append(tasks, partition.generateCreateTask(addr, randomWrite))
+		tasks = append(tasks, partition.generateCreateTask(addr))
 	}
 	return
 }
 
-func (partition *DataPartition) generateCreateTask(addr string, randomWrite bool) (task *proto.AdminTask) {
+func (partition *DataPartition) generateCreateTask(addr string) (task *proto.AdminTask) {
+
 	task = proto.NewAdminTask(proto.OpCreateDataPartition, addr, newCreateDataPartitionRequest(partition.PartitionType,
-		partition.VolName, partition.PartitionID, randomWrite))
+		partition.VolName, partition.PartitionID, partition.RandomWrite, partition.Peers))
 	partition.resetTaskID(task)
 	return
 }
 
 func (partition *DataPartition) GenerateDeleteTask(addr string) (task *proto.AdminTask) {
-	task = proto.NewAdminTask(proto.OpDeleteDataPartition, addr, newDeleteDataPartitionRequest(partition.PartitionID))
+	if !partition.RandomWrite {
+		task = proto.NewAdminTask(proto.OpDeleteDataPartition, addr, newDeleteDataPartitionRequest(partition.PartitionID))
+	} else {
+		task = proto.NewAdminTask(proto.OpDeleteDataPartition, addr, newDeleteDataPartitionRequest(partition.PartitionID))
+	}
 	partition.resetTaskID(task)
 	return
 }
@@ -410,9 +419,11 @@ func (partition *DataPartition) getReplicaIndex(addr string) (index int, err err
 	return -1, errors.Annotatef(DataReplicaNotFound, "%v not found ", addr)
 }
 
-func (partition *DataPartition) updateForOffline(offlineAddr, newAddr, volName string, c *Cluster) (err error) {
+func (partition *DataPartition) updateForOffline(offlineAddr, newAddr, volName string, newPeers []proto.Peer, c *Cluster) (err error) {
 	orgHosts := make([]string, len(partition.PersistenceHosts))
 	copy(orgHosts, partition.PersistenceHosts)
+	oldPeers := make([]proto.Peer, len(partition.Peers))
+	copy(oldPeers, partition.Peers)
 	newHosts := make([]string, 0)
 	for index, addr := range partition.PersistenceHosts {
 		if addr == offlineAddr {
@@ -424,13 +435,15 @@ func (partition *DataPartition) updateForOffline(offlineAddr, newAddr, volName s
 	}
 	newHosts = append(newHosts, newAddr)
 	partition.PersistenceHosts = newHosts
+	partition.Peers = newPeers
 	if err = c.syncUpdateDataPartition(volName, partition); err != nil {
 		partition.PersistenceHosts = orgHosts
+		partition.Peers = oldPeers
 		return errors.Annotatef(err, "update partition[%v] failed", partition.PartitionID)
 	}
 	msg := fmt.Sprintf("action[updateForOffline]  partitionID:%v offlineAddr:%v newAddr:%v"+
-		"oldHosts:%v newHosts:%v",
-		partition.PartitionID, offlineAddr, newAddr, orgHosts, partition.PersistenceHosts)
+		"oldHosts:%v newHosts:%v,oldPees[%v],newPeers[%v]",
+		partition.PartitionID, offlineAddr, newAddr, orgHosts, partition.PersistenceHosts, oldPeers, newPeers)
 	log.LogInfo(msg)
 	return
 }

@@ -17,6 +17,7 @@ package master
 import (
 	"fmt"
 	"github.com/juju/errors"
+	"github.com/tiglabs/containerfs/proto"
 	"github.com/tiglabs/containerfs/util/log"
 	"math/rand"
 	"sort"
@@ -202,9 +203,10 @@ func (rack *Rack) GetDataNodeMaxTotal() (maxTotal uint64) {
 	return
 }
 
-func (rack *Rack) getAvailDataNodeHosts(excludeHosts []string, replicaNum int) (newHosts []string, err error) {
+func (rack *Rack) getAvailDataNodeHosts(excludeHosts []string, replicaNum int) (newHosts []string, peers []proto.Peer, err error) {
 	orderHosts := make([]string, 0)
 	newHosts = make([]string, 0)
+	peers = make([]proto.Peer, 0)
 	if replicaNum == 0 {
 		return
 	}
@@ -225,6 +227,8 @@ func (rack *Rack) getAvailDataNodeHosts(excludeHosts []string, replicaNum int) (
 		node := nodeTabs[i].Ptr.(*DataNode)
 		node.SelectNodeForWrite()
 		orderHosts = append(orderHosts, node.Addr)
+		peer := proto.Peer{ID: node.Id, Addr: node.Addr}
+		peers = append(peers, peer)
 	}
 
 	if newHosts, err = rack.DisOrderArray(orderHosts); err != nil {
