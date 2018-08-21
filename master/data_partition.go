@@ -466,6 +466,7 @@ func (partition *DataPartition) UpdateMetric(vr *proto.PartitionReport, dataNode
 	replica.Total = vr.Total
 	replica.Used = vr.Used
 	replica.SetAlive()
+	replica.IsLeader = vr.IsLeader
 	partition.checkAndRemoveMissReplica(dataNode.Addr)
 }
 
