@@ -47,11 +47,22 @@ type DeleteDataPartitionRequest struct {
 	DataPartitionType string
 	PartitionId       uint64
 	PartitionSize     int
-	Members           []Peer
-	OfflineAddr       string
 }
 
 type DeleteDataPartitionResponse struct {
+	Status      uint8
+	Result      string
+	PartitionId uint64
+}
+
+
+type DataPartitionOfflineRequest struct {
+	PartitionId       uint64
+	RemovePeer  Peer
+	AddPeer     Peer
+}
+
+type DataPartitionOfflineResponse struct {
 	Status      uint8
 	Result      string
 	PartitionId uint64

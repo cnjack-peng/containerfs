@@ -87,11 +87,21 @@ func (partition *DataPartition) generateCreateTask(addr string) (task *proto.Adm
 }
 
 func (partition *DataPartition) GenerateDeleteTask(addr string) (task *proto.AdminTask) {
+	task = proto.NewAdminTask(proto.OpDeleteDataPartition, addr, newDeleteDataPartitionRequest(partition.PartitionID))
+	partition.resetTaskID(task)
+	return
+}
+
+func (partition *DataPartition) GenerateOfflineTask(removePeer proto.Peer, addPeer proto.Peer) (task *proto.AdminTask, err error) {
 	if !partition.RandomWrite {
-		task = proto.NewAdminTask(proto.OpDeleteDataPartition, addr, newDeleteDataPartitionRequest(partition.PartitionID))
-	} else {
-		task = proto.NewAdminTask(proto.OpDeleteDataPartition, addr, newDeleteDataPartitionRequest(partition.PartitionID))
+		return partition.GenerateDeleteTask(removePeer.Addr), nil
 	}
+	leaderAddr := partition.getLeaderAddr()
+	if leaderAddr == "" {
+		err = NoLeader
+		return
+	}
+	task = proto.NewAdminTask(proto.OpOfflineDataPartition, leaderAddr, newOfflineDataPartitionRequest(partition.PartitionID, removePeer, addPeer))
 	partition.resetTaskID(task)
 	return
 }
@@ -227,6 +237,17 @@ func (partition *DataPartition) convertToDataPartitionResponse() (dpr *DataParti
 	dpr.PartitionType = partition.PartitionType
 	dpr.Hosts = make([]string, len(partition.PersistenceHosts))
 	copy(dpr.Hosts, partition.PersistenceHosts)
+	dpr.RandomWrite = partition.RandomWrite
+	dpr.LeaderAddr = partition.getLeaderAddr()
+	return
+}
+
+func (partition *DataPartition) getLeaderAddr() (leaderAddr string) {
+	for _, replica := range partition.Replicas {
+		if replica.IsLeader {
+			return replica.Addr
+		}
+	}
 	return
 }
 

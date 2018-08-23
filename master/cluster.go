@@ -520,16 +520,17 @@ func (c *Cluster) delDataNodeFromCache(dataNode *DataNode) {
 
 func (c *Cluster) dataPartitionOffline(offlineAddr, volName string, dp *DataPartition, errMsg string) {
 	var (
-		newHosts []string
-		newAddr  string
-		newPeers []proto.Peer
-		msg      string
-		tasks    []*proto.AdminTask
-		task     *proto.AdminTask
-		err      error
-		dataNode *DataNode
-		rack     *Rack
-		vol      *Vol
+		newHosts   []string
+		newAddr    string
+		newPeers   []proto.Peer
+		msg        string
+		tasks      []*proto.AdminTask
+		task       *proto.AdminTask
+		err        error
+		dataNode   *DataNode
+		rack       *Rack
+		vol        *Vol
+		removePeer proto.Peer
 	)
 	dp.Lock()
 	defer dp.Unlock()
@@ -547,7 +548,6 @@ func (c *Cluster) dataPartitionOffline(offlineAddr, volName string, dp *DataPart
 	if err = dp.canOffLine(offlineAddr); err != nil {
 		goto errDeal
 	}
-	dp.generatorOffLineLog(offlineAddr)
 
 	if dataNode, err = c.getDataNode(offlineAddr); err != nil {
 		goto errDeal
@@ -564,21 +564,29 @@ func (c *Cluster) dataPartitionOffline(offlineAddr, volName string, dp *DataPart
 	}
 	newAddr = newHosts[0]
 	for _, replica := range dp.Replicas {
-		if replica.Addr != offlineAddr {
+		if replica.Addr == offlineAddr {
+			removePeer = proto.Peer{ID: replica.dataNode.Id, Addr: replica.Addr}
+		} else {
 			newPeers = append(newPeers, proto.Peer{ID: replica.dataNode.Id, Addr: replica.Addr})
 		}
 	}
+
+	if task, err = dp.GenerateOfflineTask(removePeer, newPeers[0]); err != nil {
+		goto errDeal
+	}
+	dp.generatorOffLineLog(offlineAddr)
 	if err = dp.updateForOffline(offlineAddr, newAddr, volName, newPeers, c); err != nil {
 		goto errDeal
 	}
 	dp.offLineInMem(offlineAddr)
 	dp.checkAndRemoveMissReplica(offlineAddr)
-
-	task = dp.GenerateDeleteTask(offlineAddr)
 	tasks = make([]*proto.AdminTask, 0)
 	tasks = append(tasks, task)
+	tasks = append(tasks, dp.generateCreateTask(newAddr))
 	c.putDataNodeTasks(tasks)
-	goto errDeal
+	log.LogWarnf("clusterID[%v] partitionID:%v  on Node:%v offline success,newHost[%v],PersistenceHosts:[%v]",
+		c.Name, dp.PartitionID, offlineAddr, newAddr, dp.PersistenceHosts)
+	return
 errDeal:
 	msg = fmt.Sprintf(errMsg+" clusterID[%v] partitionID:%v  on Node:%v  "+
 		"Then Fix It on newHost:%v   Err:%v , PersistenceHosts:%v  ",
@@ -586,7 +594,6 @@ errDeal:
 	if err != nil {
 		Warn(c.Name, msg)
 	}
-	log.LogWarn(msg)
 	return
 }
 

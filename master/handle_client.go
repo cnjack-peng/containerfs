@@ -35,6 +35,8 @@ type DataPartitionResponse struct {
 	ReplicaNum    uint8
 	PartitionType string
 	Hosts         []string
+	RandomWrite   bool
+	LeaderAddr    string
 }
 
 type DataPartitionsView struct {
