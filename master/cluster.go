@@ -575,6 +575,7 @@ func (c *Cluster) dataPartitionOffline(offlineAddr, volName string, dp *DataPart
 		goto errDeal
 	}
 	dp.generatorOffLineLog(offlineAddr)
+
 	if err = dp.updateForOffline(offlineAddr, newAddr, volName, newPeers, c); err != nil {
 		goto errDeal
 	}
