@@ -42,6 +42,15 @@ func newDeleteDataPartitionRequest(ID uint64) (req *proto.DeleteDataPartitionReq
 	return
 }
 
+func newOfflineDataPartitionRequest(ID uint64, removePeer, addPeer proto.Peer) (req *proto.DataPartitionOfflineRequest) {
+	req = &proto.DataPartitionOfflineRequest{
+		PartitionId: ID,
+		RemovePeer:  removePeer,
+		AddPeer:     addPeer,
+	}
+	return
+}
+
 func newLoadDataPartitionMetricRequest(partitionType string, ID uint64) (req *proto.LoadDataPartitionRequest) {
 	req = &proto.LoadDataPartitionRequest{
 		PartitionType: partitionType,
