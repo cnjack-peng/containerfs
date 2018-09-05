@@ -20,14 +20,14 @@ import (
 	"github.com/tiglabs/containerfs/proto"
 	"github.com/tiglabs/containerfs/sdk/data/wrapper"
 	"github.com/tiglabs/containerfs/util"
-	"github.com/tiglabs/containerfs/util/log"
+	//"github.com/tiglabs/containerfs/util/log"
 	"github.com/tiglabs/containerfs/util/pool"
 	"hash/crc32"
-	"math/rand"
+	//"math/rand"
 	"net"
 	"strings"
 	"sync/atomic"
-	"time"
+	//"time"
 )
 
 const (
@@ -39,77 +39,80 @@ var (
 	ReadConnectPool = pool.NewConnPool()
 )
 
+//type ExtentReader struct {
+//	inode            uint64
+//	startInodeOffset uint64
+//	endInodeOffset   uint64
+//	dp               *wrapper.DataPartition
+//	key              proto.ExtentKey
+//	readerIndex      uint32
+//}
+//
+//func NewExtentReader(inode uint64, inInodeOffset int, key proto.ExtentKey) (reader *ExtentReader, err error) {
+//	reader = new(ExtentReader)
+//	reader.dp, err = gDataWrapper.GetDataPartition(key.PartitionId)
+//	if err != nil {
+//		return
+//	}
+//	reader.inode = inode
+//	reader.key = key
+//	reader.startInodeOffset = uint64(inInodeOffset)
+//	reader.endInodeOffset = reader.startInodeOffset + uint64(key.Size)
+//	rand.Seed(time.Now().UnixNano())
+//	hasFindLocalReplica := false
+//	for index, host := range reader.dp.Hosts {
+//		if strings.Split(host, ":")[0] == wrapper.LocalIP {
+//			reader.readerIndex = uint32(index)
+//			hasFindLocalReplica = true
+//			break
+//		}
+//	}
+//	if !hasFindLocalReplica {
+//		reader.readerIndex = uint32(rand.Intn(int(reader.dp.ReplicaNum)))
+//	}
+//	return reader, nil
+//}
+
 type ExtentReader struct {
-	inode            uint64
-	startInodeOffset uint64
-	endInodeOffset   uint64
-	dp               *wrapper.DataPartition
-	key              proto.ExtentKey
-	readerIndex      uint32
+	inode       uint64
+	key         proto.ExtentKey
+	dp          *wrapper.DataPartition
+	readerIndex uint32
 }
 
-func NewExtentReader(inode uint64, inInodeOffset int, key proto.ExtentKey) (reader *ExtentReader, err error) {
-	reader = new(ExtentReader)
-	reader.dp, err = gDataWrapper.GetDataPartition(key.PartitionId)
-	if err != nil {
-		return
-	}
-	reader.inode = inode
-	reader.key = key
-	reader.startInodeOffset = uint64(inInodeOffset)
-	reader.endInodeOffset = reader.startInodeOffset + uint64(key.Size)
-	rand.Seed(time.Now().UnixNano())
-	hasFindLocalReplica := false
-	for index, host := range reader.dp.Hosts {
-		if strings.Split(host, ":")[0] == wrapper.LocalIP {
-			reader.readerIndex = uint32(index)
-			hasFindLocalReplica = true
-			break
-		}
-	}
-	if !hasFindLocalReplica {
-		reader.readerIndex = uint32(rand.Intn(int(reader.dp.ReplicaNum)))
-	}
-	return reader, nil
-}
-
-func (reader *ExtentReader) read(data []byte, offset, size, kerneloffset, kernelsize int) (err error) {
-	if size <= 0 {
-		return
-	}
-	err = reader.readDataFromDataPartition(offset, size, data, kerneloffset, kernelsize)
-
+func (reader *ExtentReader) Read(req *ExtentRequest) (readBytes int, err error) {
+	readBytes, _, err = reader.streamReadDataFromHost(req.FileOffset-int(reader.key.FileOffset), req.Size, req.Data, req.FileOffset, req.Size)
 	return
 }
 
-func (reader *ExtentReader) readDataFromDataPartition(offset, size int, data []byte, kerneloffset, kernelsize int) (err error) {
-	var host string
-	if _, host, err = reader.streamReadDataFromHost(offset, size, data, kerneloffset, kernelsize); err != nil {
-		if reader.isUseCloseConnectErr(err) {
-			reader.forceDestoryAllConnect(host)
-		}
-		log.LogWarnf(err.Error())
-		goto forLoop
-	}
-	return
-forLoop:
-	mesg := ""
-	for i := 0; i < len(reader.dp.Hosts); i++ {
-		_, host, err = reader.streamReadDataFromHost(offset, size, data, kerneloffset, kernelsize)
-		if err == nil {
-			return
-		} else if reader.isUseCloseConnectErr(err) {
-			reader.forceDestoryAllConnect(host)
-			i--
-		}
-		log.LogWarn(err.Error())
-		mesg += fmt.Sprintf(" (index(%v) err(%v))", i, err.Error())
-	}
-	log.LogWarn(mesg)
-	err = fmt.Errorf(mesg)
-
-	return
-}
+//func (reader *ExtentReader) readDataFromDataPartition(offset, size int, data []byte, kerneloffset, kernelsize int) (err error) {
+//	var host string
+//	if _, host, err = reader.streamReadDataFromHost(offset, size, data, kerneloffset, kernelsize); err != nil {
+//		if reader.isUseCloseConnectErr(err) {
+//			reader.forceDestoryAllConnect(host)
+//		}
+//		log.LogWarnf(err.Error())
+//		goto forLoop
+//	}
+//	return
+//forLoop:
+//	mesg := ""
+//	for i := 0; i < len(reader.dp.Hosts); i++ {
+//		_, host, err = reader.streamReadDataFromHost(offset, size, data, kerneloffset, kernelsize)
+//		if err == nil {
+//			return
+//		} else if reader.isUseCloseConnectErr(err) {
+//			reader.forceDestoryAllConnect(host)
+//			i--
+//		}
+//		log.LogWarn(err.Error())
+//		mesg += fmt.Sprintf(" (index(%v) err(%v))", i, err.Error())
+//	}
+//	log.LogWarn(mesg)
+//	err = fmt.Errorf(mesg)
+//
+//	return
+//}
 
 func (reader *ExtentReader) isUseCloseConnectErr(err error) bool {
 	return strings.Contains(err.Error(), "use of closed network connection")
@@ -201,21 +204,21 @@ func (reader *ExtentReader) checkStreamReply(request *Packet, reply *Packet, ker
 	return nil
 }
 
-func (reader *ExtentReader) updateKey(key proto.ExtentKey) (update bool) {
-	if !(key.PartitionId == reader.key.PartitionId && key.ExtentId == reader.key.ExtentId) {
-		return
-	}
-	if key.Size <= reader.key.Size {
-		return
-	}
-	reader.key = key
-	end := atomic.LoadUint64(&reader.startInodeOffset) + uint64(key.Size)
-	atomic.StoreUint64(&reader.endInodeOffset, end)
-
-	return true
-}
+//func (reader *ExtentReader) updateKey(key proto.ExtentKey) (update bool) {
+//	if !(key.PartitionId == reader.key.PartitionId && key.ExtentId == reader.key.ExtentId) {
+//		return
+//	}
+//	if key.Size <= reader.key.Size {
+//		return
+//	}
+//	reader.key = key
+//	end := atomic.LoadUint64(&reader.startInodeOffset) + uint64(key.Size)
+//	atomic.StoreUint64(&reader.endInodeOffset, end)
+//
+//	return true
+//}
 
 func (reader *ExtentReader) toString() (m string) {
-	return fmt.Sprintf("inode (%v) extentKey(%v) start(%v) end(%v)", reader.inode,
-		reader.key.Marshal(), reader.startInodeOffset, reader.endInodeOffset)
+	return fmt.Sprintf("inode (%v) extentKey(%v)", reader.inode,
+		reader.key.Marshal())
 }

@@ -56,10 +56,11 @@ type CloseRequest struct {
 
 type StreamWriter struct {
 	currentWriter           *ExtentWriter //current ExtentWriter
-	errCount                int           //error count
-	currentPartitionId      uint32        //current PartitionId
-	currentExtentId         uint64        //current FileId
-	Inode                   uint64        //inode
+	client                  *ExtentClient
+	errCount                int    //error count
+	currentPartitionId      uint32 //current PartitionId
+	currentExtentId         uint64 //current FileId
+	Inode                   uint64 //inode
 	excludePartition        []uint32
 	appendExtentKey         AppendExtentKeyFunc
 	requestCh               chan interface{}
@@ -68,26 +69,28 @@ type StreamWriter struct {
 	hasWriteSize            uint64
 	hasClosed               int32
 	hasUpdateToMetaNodeSize uint64
+
+	extents *ExtentCache
 }
 
-func NewStreamWriter(inode, start uint64, appendExtentKey AppendExtentKeyFunc) (stream *StreamWriter) {
+func NewStreamWriter(client *ExtentClient, inode uint64) (stream *StreamWriter) {
 	stream = new(StreamWriter)
-	stream.appendExtentKey = appendExtentKey
+	stream.client = client
 	stream.Inode = inode
-	stream.setHasWriteSize(start)
 	stream.requestCh = make(chan interface{}, 1000)
 	stream.exitCh = make(chan bool, 10)
 	stream.excludePartition = make([]uint32, 0)
 	stream.hasUpdateKey = make(map[string]int, 0)
+	stream.extents = NewExtentCache()
 	go stream.server()
 
 	return
 }
 
-func (stream *StreamWriter) toString() (m string) {
+func (stream *StreamWriter) String() (m string) {
 	currentWriterMsg := ""
 	if stream.currentWriter != nil {
-		currentWriterMsg = stream.currentWriter.toString()
+		currentWriterMsg = stream.currentWriter.String()
 	}
 	return fmt.Sprintf("inode(%v) currentDataPartion(%v) currentExtentId(%v)"+
 		" errCount(%v)", stream.Inode, stream.currentPartitionId, currentWriterMsg,
@@ -95,16 +98,21 @@ func (stream *StreamWriter) toString() (m string) {
 }
 
 func (stream *StreamWriter) toStringWithWriter(writer *ExtentWriter) (m string) {
-	currentWriterMsg := writer.toString()
 	return fmt.Sprintf("inode(%v) currentDataPartion(%v) currentExtentId(%v)"+
-		" errCount(%v)", stream.Inode, stream.currentPartitionId, currentWriterMsg,
+		" errCount(%v)", stream.Inode, stream.currentPartitionId, writer,
 		stream.errCount)
 }
 
+func (stream *StreamWriter) needFlush(fileOffset uint64) bool {
+	return stream.currentWriter != nil &&
+		(stream.currentWriter.fileOffset+uint64(stream.currentWriter.offset) != fileOffset ||
+			stream.currentWriter.isFullExtent())
+}
+
 //stream init,alloc a extent ,select dp and extent
-func (stream *StreamWriter) init() (err error) {
-	if stream.currentWriter != nil && stream.currentWriter.isFullExtent() {
-		if err = stream.flushCurrExtentWriter(); err != nil {
+func (stream *StreamWriter) init(fileOffset uint64) (err error) {
+	if stream.needFlush(fileOffset) {
+		if err = stream.flushCurrExtentWriter(true); err != nil {
 			return errors.Annotatef(err, "WriteInit")
 		}
 	}
@@ -113,7 +121,7 @@ func (stream *StreamWriter) init() (err error) {
 		return
 	}
 	var writer *ExtentWriter
-	writer, err = stream.allocateNewExtentWriter()
+	writer, err = stream.allocateNewExtentWriter(fileOffset)
 	if err != nil {
 		err = errors.Annotatef(err, "WriteInit AllocNewExtentFailed")
 		return err
@@ -131,16 +139,16 @@ func (stream *StreamWriter) server() {
 		case request := <-stream.requestCh:
 			stream.handleRequest(request)
 		case <-stream.exitCh:
-			stream.flushCurrExtentWriter()
+			stream.flushCurrExtentWriter(true)
 			return
 		case <-t.C:
 			atomic.StoreUint64(&stream.hasUpdateToMetaNodeSize, uint64(stream.updateToMetaNodeSize()))
 			log.LogDebugf("inode(%v) update to metanode filesize To(%v) user has Write to (%v)",
-				stream.Inode, stream.getHasUpdateToMetaNodeSize(), stream.getHasWriteSize())
+				stream.Inode, stream.getHasUpdateToMetaNodeSize(), stream.extents.Size())
 			if stream.getCurrentWriter() == nil {
 				continue
 			}
-			stream.flushCurrExtentWriter()
+			stream.flushCurrExtentWriter(false)
 		}
 	}
 }
@@ -148,23 +156,13 @@ func (stream *StreamWriter) server() {
 func (stream *StreamWriter) handleRequest(request interface{}) {
 	switch request := request.(type) {
 	case *WriteRequest:
-		if request.kernelOffset < int(stream.getHasWriteSize()) {
-			cutSize := int(stream.getHasWriteSize()) - request.kernelOffset
-			if cutSize < len(request.data) {
-				request.kernelOffset += cutSize
-				request.data = request.data[cutSize:]
-				request.size -= cutSize
-				request.cutSize = cutSize
-			}
-		}
 		request.canWrite, request.err = stream.write(request.data, request.kernelOffset, request.size)
-		stream.addHasWriteSize(request.canWrite)
 		request.done <- struct{}{}
 	case *FlushRequest:
-		request.err = stream.flushCurrExtentWriter()
+		request.err = stream.flushCurrExtentWriter(false)
 		request.done <- struct{}{}
 	case *CloseRequest:
-		request.err = stream.flushCurrExtentWriter()
+		request.err = stream.flushCurrExtentWriter(true)
 		if request.err == nil {
 			request.err = stream.close()
 		}
@@ -175,6 +173,33 @@ func (stream *StreamWriter) handleRequest(request interface{}) {
 }
 
 func (stream *StreamWriter) write(data []byte, offset, size int) (total int, err error) {
+	err = stream.extents.Refresh(stream.Inode, stream.client.getExtents)
+	if err != nil {
+		return
+	}
+
+	requests := stream.extents.PrepareRequest(offset, size, data)
+	for _, req := range requests {
+		var writeSize int
+		if req.ExtentKey != nil {
+			writeSize, err = stream.doRewrite(req)
+		} else {
+			writeSize, err = stream.doWrite(req.Data, req.FileOffset, req.Size)
+		}
+		if err != nil {
+			break
+		}
+		total += writeSize
+	}
+	return
+}
+
+func (stream *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error) {
+	//TODO
+	return
+}
+
+func (stream *StreamWriter) doWrite(data []byte, offset, size int) (total int, err error) {
 	var (
 		write int
 	)
@@ -185,14 +210,14 @@ func (stream *StreamWriter) write(data []byte, offset, size int) (total int, err
 		}
 		err = errors.Annotatef(err, "UserRequest{inode(%v) write "+
 			"KernelOffset(%v) KernelSize(%v) hasWrite(%v)}  stream{ (%v) occous error}",
-			stream.Inode, offset, size, total, stream.toString())
+			stream.Inode, offset, size, total, stream)
 		log.LogError(err.Error())
 		log.LogError(errors.ErrorStack(err))
 	}()
 
 	var initRetry int = 0
 	for total < size {
-		if err = stream.init(); err != nil {
+		if err = stream.init(uint64(offset + total)); err != nil {
 			if initRetry++; initRetry > MaxStreamInitRetry {
 				return total, err
 			}
@@ -225,7 +250,7 @@ func (stream *StreamWriter) close() (err error) {
 	return
 }
 
-func (stream *StreamWriter) flushCurrExtentWriter() (err error) {
+func (stream *StreamWriter) flushCurrExtentWriter(close bool) (err error) {
 	var status error
 	defer func() {
 		if err == nil || status == syscall.ENOENT {
@@ -236,7 +261,7 @@ func (stream *StreamWriter) flushCurrExtentWriter() (err error) {
 		stream.errCount++
 		if stream.errCount < MaxSelectDataPartionForWrite {
 			if err = stream.recoverExtent(); err == nil {
-				err = stream.flushCurrExtentWriter()
+				err = stream.flushCurrExtentWriter(false)
 			}
 		}
 	}()
@@ -246,14 +271,14 @@ func (stream *StreamWriter) flushCurrExtentWriter() (err error) {
 		return nil
 	}
 	if err = writer.flush(); err != nil {
-		err = errors.Annotatef(err, "writer(%v) Flush Failed", writer.toString())
+		err = errors.Annotatef(err, "writer(%v) Flush Failed", writer)
 		return err
 	}
 	if err = stream.updateToMetaNode(); err != nil {
 		err = errors.Annotatef(err, "update to MetaNode failed(%v)", err.Error())
 		return err
 	}
-	if writer.isFullExtent() {
+	if close || writer.isFullExtent() {
 		writer.close()
 		writer.getConnect().Close()
 		if err = stream.updateToMetaNode(); err != nil {
@@ -300,14 +325,14 @@ func (stream *StreamWriter) updateToMetaNode() (err error) {
 		if lastUpdateSize == int(ek.Size) {
 			return nil
 		}
-		err = stream.appendExtentKey(stream.Inode, ek) //put it to metanode
+		err = stream.client.appendExtentKey(stream.Inode, ek) //put it to metanode
 		if err == syscall.ENOENT {
 			stream.exit()
 			return
 		}
 		if err != nil {
 			err = errors.Annotatef(err, "update extent(%v) to MetaNode Failed", ek.Size)
-			log.LogErrorf("stream(%v) err(%v)", stream.toString(), err.Error())
+			log.LogErrorf("stream(%v) err(%v)", stream, err)
 			continue
 		}
 		stream.addHasUpdateToMetaNodeSize(int(ek.Size) - lastUpdateSize)
@@ -321,7 +346,7 @@ func (stream *StreamWriter) updateToMetaNode() (err error) {
 func (stream *StreamWriter) writeRecoverPackets(writer *ExtentWriter, retryPackets []*Packet) (err error) {
 	for _, p := range retryPackets {
 		log.LogInfof("recover packet (%v) kernelOffset(%v) to extent(%v)",
-			p.GetUniqueLogId(), p.kernelOffset, writer.toString())
+			p.GetUniqueLogId(), p.kernelOffset, writer)
 		_, err = writer.write(p.Data, p.kernelOffset, int(p.Size))
 		if err != nil {
 			err = errors.Annotatef(err, "pkg(%v) RecoverExtent write failed", p.GetUniqueLogId())
@@ -345,9 +370,9 @@ func (stream *StreamWriter) recoverExtent() (err error) {
 	var writer *ExtentWriter
 	for i := 0; i < MaxSelectDataPartionForWrite; i++ {
 		err = nil
-		if writer, err = stream.allocateNewExtentWriter(); err != nil { //allocate new extent
+		if writer, err = stream.allocateNewExtentWriter(uint64(retryPackets[0].kernelOffset)); err != nil { //allocate new extent
 			err = errors.Annotatef(err, "RecoverExtent Failed")
-			log.LogErrorf("stream(%v) err(%v)", stream.toString(), err.Error())
+			log.LogErrorf("stream(%v) err(%v)", stream, err)
 			continue
 		}
 		if err = stream.writeRecoverPackets(writer, retryPackets); err == nil {
@@ -365,7 +390,7 @@ func (stream *StreamWriter) recoverExtent() (err error) {
 
 }
 
-func (stream *StreamWriter) allocateNewExtentWriter() (writer *ExtentWriter, err error) {
+func (stream *StreamWriter) allocateNewExtentWriter(fileOffset uint64) (writer *ExtentWriter, err error) {
 	var (
 		dp       *wrapper.DataPartition
 		extentId uint64
@@ -374,17 +399,17 @@ func (stream *StreamWriter) allocateNewExtentWriter() (writer *ExtentWriter, err
 	for i := 0; i < MaxSelectDataPartionForWrite; i++ {
 		if dp, err = gDataWrapper.GetWriteDataPartition(stream.excludePartition); err != nil {
 			log.LogWarn(fmt.Sprintf("stream (%v) ActionAllocNewExtentWriter "+
-				"failed on getWriteDataPartion,error(%v) execludeDataPartion(%v)", stream.toString(), err.Error(), stream.excludePartition))
+				"failed on getWriteDataPartion,error(%v) execludeDataPartion(%v)", stream, err, stream.excludePartition))
 			continue
 		}
 		if extentId, err = stream.createExtent(dp); err != nil {
 			log.LogWarn(fmt.Sprintf("stream (%v)ActionAllocNewExtentWriter "+
-				"create Extent,error(%v) execludeDataPartion(%v)", stream.toString(), err.Error(), stream.excludePartition))
+				"create Extent,error(%v) execludeDataPartion(%v)", stream, err, stream.excludePartition))
 			continue
 		}
-		if writer, err = NewExtentWriter(stream.Inode, dp, extentId); err != nil {
+		if writer, err = NewExtentWriter(stream.Inode, dp, extentId, fileOffset); err != nil {
 			log.LogWarn(fmt.Sprintf("stream (%v) ActionAllocNewExtentWriter "+
-				"NewExtentWriter(%v),error(%v) execludeDataPartion(%v)", stream.toString(), extentId, err.Error(), stream.excludePartition))
+				"NewExtentWriter(%v),error(%v) execludeDataPartion(%v)", stream, extentId, err, stream.excludePartition))
 			continue
 		}
 		break
@@ -442,20 +467,6 @@ func (stream *StreamWriter) exit() {
 	case stream.exitCh <- true:
 	default:
 	}
-}
-
-func (stream *StreamWriter) getHasWriteSize() uint64 {
-	return atomic.LoadUint64(&stream.hasWriteSize)
-}
-
-func (stream *StreamWriter) addHasWriteSize(writed int) {
-	atomic.AddUint64(&stream.hasWriteSize, uint64(writed))
-}
-
-func (stream *StreamWriter) setHasWriteSize(writeSize uint64) {
-	atomic.StoreUint64(&stream.hasUpdateToMetaNodeSize, writeSize)
-	atomic.StoreUint64(&stream.hasWriteSize, writeSize)
-
 }
 
 func (stream *StreamWriter) addHasUpdateToMetaNodeSize(writed int) {

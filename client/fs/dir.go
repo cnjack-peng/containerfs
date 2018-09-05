@@ -82,7 +82,7 @@ func (d *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.Cr
 	inode := NewInode(info)
 	d.super.ic.Put(inode)
 	child := NewFile(d.super, inode)
-	d.super.ec.OpenForWrite(inode.ino, 0)
+	d.super.ec.OpenForWrite(inode.ino)
 
 	elapsed := time.Since(start)
 	log.LogDebugf("TRACE Create: parent(%v) req(%v) resp(%v) ino(%v) (%v)ns", d.inode.ino, req, resp, inode.ino, elapsed.Nanoseconds())

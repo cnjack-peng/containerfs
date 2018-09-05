@@ -28,7 +28,7 @@ import (
 )
 
 type AppendExtentKeyFunc func(inode uint64, key proto.ExtentKey) error
-type GetExtentsFunc func(inode uint64) ([]proto.ExtentKey, error)
+type GetExtentsFunc func(inode uint64) (uint64, uint64, []proto.ExtentKey, error)
 
 var (
 	gDataWrapper     *wrapper.Wrapper
@@ -116,10 +116,10 @@ func (client *ExtentClient) Write(inode uint64, offset int, data []byte) (write 
 }
 
 func (client *ExtentClient) OpenForRead(inode uint64) (stream *StreamReader, err error) {
-	return NewStreamReader(inode, client.getExtents)
+	return NewStreamReader(client, inode)
 }
 
-func (client *ExtentClient) OpenForWrite(inode, start uint64) {
+func (client *ExtentClient) OpenForWrite(inode uint64) {
 	client.referLock.Lock()
 	refercnt, ok := client.referCnt[inode]
 	if !ok {
@@ -141,30 +141,23 @@ func (client *ExtentClient) OpenForWrite(inode, start uint64) {
 	client.writerLock.Lock()
 	_, ok = client.writers[inode]
 	if !ok {
-		writer := NewStreamWriter(inode, start, client.appendExtentKey)
+		writer := NewStreamWriter(client, inode)
 		client.writers[inode] = writer
 	}
 	client.writerLock.Unlock()
 
 }
 
-func (client *ExtentClient) GetWriteSize(inode uint64) uint64 {
+func (client *ExtentClient) GetFileSize(inode uint64) uint64 {
 	client.writerLock.RLock()
 	defer client.writerLock.RUnlock()
+
 	writer, ok := client.writers[inode]
 	if !ok {
 		return 0
 	}
-	return writer.getHasWriteSize()
-}
 
-func (client *ExtentClient) SetWriteSize(inode, size uint64) {
-	client.writerLock.Lock()
-	defer client.writerLock.Unlock()
-	writer, ok := client.writers[inode]
-	if ok {
-		writer.setHasWriteSize(size)
-	}
+	return writer.extents.Size()
 }
 
 func (client *ExtentClient) deleteRefercnt(inode uint64) {
