@@ -264,18 +264,18 @@ func (mw *MetaWrapper) AppendExtentKey(inode uint64, ek proto.ExtentKey) error {
 	return nil
 }
 
-func (mw *MetaWrapper) GetExtents(inode uint64) ([]proto.ExtentKey, error) {
+func (mw *MetaWrapper) GetExtents(inode uint64) (gen uint64, size uint64, extents []proto.ExtentKey, err error) {
 	mp := mw.getPartitionByInode(inode)
 	if mp == nil {
-		return nil, syscall.ENOENT
+		return 0, 0, nil, syscall.ENOENT
 	}
 
-	status, extents, err := mw.getExtents(mp, inode)
+	status, gen, size, extents, err := mw.getExtents(mp, inode)
 	if err != nil || status != statusOK {
 		log.LogErrorf("GetExtents: err(%v) status(%v)", err, status)
-		return nil, statusToErrno(status)
+		return 0, 0, nil, statusToErrno(status)
 	}
-	return extents, nil
+	return gen, size, extents, nil
 }
 
 func (mw *MetaWrapper) Truncate(inode uint64) error {

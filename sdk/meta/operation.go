@@ -530,7 +530,7 @@ func (mw *MetaWrapper) appendExtentKey(mp *MetaPartition, inode uint64, extent p
 	return status, nil
 }
 
-func (mw *MetaWrapper) getExtents(mp *MetaPartition, inode uint64) (status int, extents []proto.ExtentKey, err error) {
+func (mw *MetaWrapper) getExtents(mp *MetaPartition, inode uint64) (status int, gen, size uint64, extents []proto.ExtentKey, err error) {
 	req := &proto.GetExtentsRequest{
 		VolName:     mw.volname,
 		PartitionID: mp.PartitionID,
@@ -568,7 +568,7 @@ func (mw *MetaWrapper) getExtents(mp *MetaPartition, inode uint64) (status int, 
 		log.LogErrorf("getExtents: mp(%v) err(%v) PacketData(%v)", mp, err, string(packet.Data))
 		return
 	}
-	return statusOK, resp.Extents, nil
+	return statusOK, resp.Generation, resp.Size, resp.Extents, nil
 }
 
 func (mw *MetaWrapper) truncate(mp *MetaPartition, inode uint64) (status int, err error) {

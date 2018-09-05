@@ -187,7 +187,9 @@ type GetExtentsRequest struct {
 }
 
 type GetExtentsResponse struct {
-	Extents []ExtentKey `json:"eks"`
+	Generation uint64      `json:"gen"`
+	Size       uint64      `json:"sz"`
+	Extents    []ExtentKey `json:"eks"`
 }
 
 type TruncateRequest struct {
@@ -196,8 +198,4 @@ type TruncateRequest struct {
 	Inode       uint64 `json:"ino"`
 	FileOffset  uint64 `json:"fof"` // always 0 for now
 	Size        uint64 `json:"sz"`  // always 0 for now
-}
-
-type TruncateResponse struct {
-	Extents []ExtentKey `json:"ek"`
 }

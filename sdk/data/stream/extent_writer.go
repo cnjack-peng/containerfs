@@ -62,9 +62,10 @@ type ExtentWriter struct {
 	flushSignleCh    chan bool
 	hasExitRecvThead int32
 	updateSizeLock   sync.Mutex
+	fileOffset       uint64
 }
 
-func NewExtentWriter(inode uint64, dp *wrapper.DataPartition, extentId uint64) (writer *ExtentWriter, err error) {
+func NewExtentWriter(inode uint64, dp *wrapper.DataPartition, extentId, fileOffset uint64) (writer *ExtentWriter, err error) {
 	if extentId <= 0 {
 		return nil, fmt.Errorf("inode(%v),dp(%v),unavalid extentId(%v)", inode, dp.PartitionID, extentId)
 	}
@@ -74,6 +75,7 @@ func NewExtentWriter(inode uint64, dp *wrapper.DataPartition, extentId uint64) (
 	writer.extentId = extentId
 	writer.dp = dp
 	writer.inode = inode
+	writer.fileOffset = fileOffset
 	writer.flushSignleCh = make(chan bool, 1)
 	var connect *net.TCPConn
 	conn, err := net.DialTimeout("tcp", dp.Hosts[0], time.Second)
@@ -119,7 +121,7 @@ func (writer *ExtentWriter) write(data []byte, kernelOffset, size int) (total in
 		if err != nil {
 			writer.getConnect().Close()
 			writer.cleanHandleCh()
-			err = errors.Annotatef(err, "writer(%v) write failed", writer.toString())
+			err = errors.Annotatef(err, "writer(%v) write failed", writer)
 		}
 	}()
 	if writer.offset+util.BlockSize*10 >= util.ExtentSize {
@@ -163,7 +165,7 @@ func (writer *ExtentWriter) sendCurrPacket() (err error) {
 	prefix := fmt.Sprintf("send inode %v_%v", writer.inode, packet.kernelOffset)
 	log.LogDebugf(prefix+" to extent(%v) pkg(%v) orgextentOffset(%v)"+
 		" packetGetPacketLength(%v) after jia(%v) crc(%v)",
-		writer.toString(), packet.GetUniqueLogId(), orgOffset, packet.getPacketLength(),
+		writer, packet.GetUniqueLogId(), orgOffset, packet.getPacketLength(),
 		writer.offset, packet.Crc)
 	if err == nil {
 		writer.handleCh <- ContinueReceive
@@ -206,7 +208,7 @@ func (writer *ExtentWriter) isAllFlushed() bool {
 	return !(writer.getQueueListLen() > 0 || writer.currentPacket != nil)
 }
 
-func (writer *ExtentWriter) toString() string {
+func (writer *ExtentWriter) String() string {
 	return fmt.Sprintf("extent{inode=%v dp=%v extentId=%v handleCh(%v) requestQueueLen(%v) }",
 		writer.inode, writer.dp.PartitionID, writer.extentId,
 		len(writer.handleCh), writer.getQueueListLen())
@@ -227,7 +229,7 @@ func (writer *ExtentWriter) flush() (err error) {
 	err = errors.Annotatef(FlushErr, "cannot backEndlush writer")
 	defer func() {
 		writer.checkIsStopReciveGoRoutine()
-		log.LogDebugf(writer.toString()+" Flush DataNode cost(%v)ns", time.Now().UnixNano()-start)
+		log.LogDebugf("%v Flush DataNode cost(%v)ns", writer, time.Now().UnixNano()-start)
 		if err == nil {
 			return
 		}
@@ -284,27 +286,27 @@ func (writer *ExtentWriter) processReply(e *list.Element, request, reply *Packet
 	if reply.ResultCode != proto.OpOk {
 		return errors.Annotatef(fmt.Errorf("reply status code(%v) is not ok,request (%v) "+
 			"but reply (%v) ", reply.ResultCode, request.GetUniqueLogId(), reply.GetUniqueLogId()),
-			fmt.Sprintf("writer(%v)", writer.toString()))
+			fmt.Sprintf("writer(%v)", writer))
 	}
 	if !request.IsEqualWriteReply(reply) {
 		return errors.Annotatef(fmt.Errorf("request not equare reply , request (%v) "+
 			"and reply (%v) ", request.GetUniqueLogId(), reply.GetUniqueLogId()),
-			fmt.Sprintf("writer(%v)", writer.toString()))
+			fmt.Sprintf("writer(%v)", writer))
 	}
 	if reply.Crc != request.Crc {
 		return errors.Annotatef(fmt.Errorf("crc not match on  request (%v) "+
 			"and reply (%v) expectCrc(%v) but reciveCrc(%v) ", request.GetUniqueLogId(), reply.GetUniqueLogId(), request.Crc, reply.Crc),
-			fmt.Sprintf("writer(%v)", writer.toString()))
+			fmt.Sprintf("writer(%v)", writer))
 	}
 
 	writer.updateSizeLock.Lock()
 	if atomic.LoadInt64(&writer.forbidUpdate) == ForBidUpdateExtentKey {
 		writer.updateSizeLock.Unlock()
-		return fmt.Errorf("forbid update extent key (%v)", writer.toString())
+		return fmt.Errorf("forbid update extent key (%v)", writer)
 	}
 	if atomic.LoadInt64(&writer.forbidUpdate) == ForBidUpdateMetaNode {
 		writer.updateSizeLock.Unlock()
-		return fmt.Errorf("forbid update extent key (%v) to metanode", writer.toString())
+		return fmt.Errorf("forbid update extent key (%v) to metanode", writer)
 	}
 	writer.removeRquest(e)
 	writer.addByteAck(uint64(request.Size))
@@ -319,7 +321,7 @@ func (writer *ExtentWriter) processReply(e *list.Element, request, reply *Packet
 		}
 	}
 	log.LogDebugf("recive inode(%v) kerneloffset(%v) to extent(%v) pkg(%v) recive(%v)",
-		writer.inode, request.kernelOffset, writer.toString(), request.GetUniqueLogId(), reply.GetUniqueLogId())
+		writer.inode, request.kernelOffset, writer, request.GetUniqueLogId(), reply.GetUniqueLogId())
 	proto.Buffers.Put(request.Data)
 
 	return nil
@@ -329,6 +331,7 @@ func (writer *ExtentWriter) toKey() (k proto.ExtentKey) {
 	writer.updateSizeLock.Lock()
 	defer writer.updateSizeLock.Unlock()
 	k = proto.ExtentKey{}
+	k.FileOffset = writer.fileOffset
 	k.PartitionId = writer.dp.PartitionID
 	k.Size = uint32(writer.getByteAck())
 	k.ExtentId = writer.extentId

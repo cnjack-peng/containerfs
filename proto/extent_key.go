@@ -21,11 +21,14 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/tiglabs/containerfs/util/btree"
 )
 
 var InvalidKey = errors.New("invalid key error")
 
 type ExtentKey struct {
+	FileOffset  uint64
 	PartitionId uint32
 	ExtentId    uint64
 	Size        uint32
@@ -33,15 +36,12 @@ type ExtentKey struct {
 }
 
 func (ek ExtentKey) String() string {
-	return fmt.Sprintf("ExtentKey{Partition(%v),ExtentID(%v),Size(%v),CRC(%v)}", ek.PartitionId, ek.ExtentId, ek.Size, ek.Crc)
+	return fmt.Sprintf("ExtentKey{FileOffset(%v),Partition(%v),ExtentID(%v),Size(%v),CRC(%v)}", ek.FileOffset, ek.PartitionId, ek.ExtentId, ek.Size, ek.Crc)
 }
 
-func (ek *ExtentKey) Equal(k ExtentKey) bool {
-	return ek.PartitionId == k.PartitionId && ek.ExtentId == k.ExtentId
-}
-
-func (ek *ExtentKey) FullEqual(k ExtentKey) bool {
-	return ek.PartitionId == k.PartitionId && ek.ExtentId == k.ExtentId && ek.Size == k.Size
+func (this *ExtentKey) Less(than btree.Item) bool {
+	that := than.(*ExtentKey)
+	return this.FileOffset < that.FileOffset
 }
 
 func (k *ExtentKey) Marshal() (m string) {

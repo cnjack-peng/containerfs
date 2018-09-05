@@ -78,8 +78,8 @@ func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
 	}
 
 	inode.fillAttr(a)
-	if writeSize := f.super.ec.GetWriteSize(ino); writeSize > a.Size {
-		a.Size = writeSize
+	if fileSize := f.super.ec.GetFileSize(ino); fileSize > a.Size {
+		a.Size = fileSize
 	}
 
 	log.LogDebugf("TRACE Attr: inode(%v) attr(%v)", inode, a)
@@ -108,15 +108,7 @@ func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 		return nil, ParseError(err)
 	}
 
-	//FIXME: let open return inode info
-	inode, err := f.super.InodeGet(ino)
-	if err != nil {
-		f.super.ic.Delete(ino)
-		log.LogErrorf("Open: ino(%v) req(%v) err(%v)", ino, req, ParseError(err))
-		return nil, ParseError(err)
-	}
-
-	f.super.ec.OpenForWrite(ino, inode.size)
+	f.super.ec.OpenForWrite(ino)
 
 	elapsed := time.Since(start)
 	log.LogDebugf("TRACE Open: ino(%v) flags(%v) (%v)ns", ino, req.Flags, elapsed.Nanoseconds())
@@ -229,7 +221,6 @@ func (f *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse
 			return ParseError(err)
 		}
 		f.super.ic.Delete(ino)
-		f.super.ec.SetWriteSize(ino, 0)
 	}
 
 	inode, err := f.super.InodeGet(ino)
