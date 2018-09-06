@@ -1,10 +1,12 @@
 package stream
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/tiglabs/containerfs/proto"
 	"github.com/tiglabs/containerfs/util/btree"
+	"github.com/tiglabs/containerfs/util/log"
 )
 
 type ExtentRequest struct {
@@ -12,6 +14,10 @@ type ExtentRequest struct {
 	Size       int
 	Data       []byte
 	ExtentKey  *proto.ExtentKey
+}
+
+func (er *ExtentRequest) String() string {
+	return fmt.Sprintf("FileOffset(%v) Size(%v) ExtentKey(%v)", er.FileOffset, er.Size, er.ExtentKey)
 }
 
 func NewExtentRequest(offset, size int, data []byte, ek *proto.ExtentKey) *ExtentRequest {
@@ -39,7 +45,9 @@ func (cache *ExtentCache) Refresh(inode uint64, getExtents GetExtentsFunc) error
 	if err != nil {
 		return err
 	}
+	//log.LogDebugf("Local ExtentCache before update: gen(%v) size(%v) extents(%v)", cache.gen, cache.size, cache.List())
 	cache.update(gen, size, extents)
+	//log.LogDebugf("Local ExtentCache after update: gen(%v) size(%v) extents(%v)", cache.gen, cache.size, cache.List())
 	return nil
 }
 
@@ -47,14 +55,19 @@ func (cache *ExtentCache) update(gen, size uint64, eks []proto.ExtentKey) {
 	cache.Lock()
 	defer cache.Unlock()
 
+	//log.LogDebugf("update: gen(%v) size(%v) eks(%v)", gen, size, eks)
+
 	if cache.gen != 0 && cache.gen >= gen {
 		return
 	}
 
 	cache.gen = gen
+	cache.size = size
 	cache.root = btree.New(32)
 	for _, ek := range eks {
-		cache.root.ReplaceOrInsert(&ek)
+		//log.LogDebugf("update: ek(%v)", ek)
+		extent := ek
+		cache.root.ReplaceOrInsert(&extent)
 	}
 }
 
@@ -97,6 +110,12 @@ func (cache *ExtentCache) Size() uint64 {
 	return cache.size
 }
 
+func (cache *ExtentCache) SetSize(size uint64) {
+	cache.Lock()
+	defer cache.Unlock()
+	cache.size = size
+}
+
 func (cache *ExtentCache) List() []*proto.ExtentKey {
 	cache.RLock()
 	root := cache.root.Clone()
@@ -135,51 +154,62 @@ func (cache *ExtentCache) PrepareRequest(offset, size int, data []byte) []*Exten
 	cache.RLock()
 	defer cache.RUnlock()
 
-	cache.root.AscendLessThan(pivot, func(i btree.Item) bool {
+	cache.root.AscendGreaterOrEqual(pivot, func(i btree.Item) bool {
 		ek := i.(*proto.ExtentKey)
 		ekStart := int(ek.FileOffset)
 		ekEnd := int(ek.FileOffset) + int(ek.Size)
 
+		log.LogDebugf("PrepareRequest: start(%v) end(%v) ekStart(%v) ekEnd(%v)", start, end, ekStart, ekEnd)
+
 		if start < ekStart {
 			if end <= ekStart {
-				// add hole (start, end)
-				req := NewExtentRequest(start, end, data[start-offset:end-offset], nil)
-				requests = append(requests, req)
 				return false
 			} else if end < ekEnd {
 				// add hole (start, ekStart)
-				req := NewExtentRequest(start, ekStart, data[start-offset:ekStart-offset], nil)
+				req := NewExtentRequest(start, ekStart-start, data[start-offset:ekStart-offset], nil)
 				requests = append(requests, req)
 				// add non-hole (ekStart, end)
-				req = NewExtentRequest(ekStart, end, data[ekStart-offset:end-offset], ek)
+				req = NewExtentRequest(ekStart, end-ekStart, data[ekStart-offset:end-offset], ek)
 				requests = append(requests, req)
+				start = end
 				return false
 			} else {
+				// add hole (start, ekStart)
+				req := NewExtentRequest(start, ekStart-start, data[start-offset:ekStart-offset], nil)
+				requests = append(requests, req)
+
+				// add non-hole (ekStart, ekEnd)
+				req = NewExtentRequest(ekStart, ekEnd-ekStart, data[ekStart-offset:ekEnd-offset], ek)
+				requests = append(requests, req)
+
+				start = ekEnd
 				return true
 			}
 		} else if start < ekEnd {
 			if end <= ekEnd {
 				// add non-hole (start, end)
-				req := NewExtentRequest(start, end, data[start-offset:end-offset], ek)
+				req := NewExtentRequest(start, end-start, data[start-offset:end-offset], ek)
 				requests = append(requests, req)
+				start = end
 				return false
 			} else {
 				// add non-hole (start, ekEnd), start = ekEnd
-				req := NewExtentRequest(start, ekEnd, data[start-offset:ekEnd-offset], ek)
+				req := NewExtentRequest(start, ekEnd-start, data[start-offset:ekEnd-offset], ek)
 				requests = append(requests, req)
+				start = ekEnd
 				return true
 			}
 		} else {
-			if end <= ekEnd {
-				//add hole (start, end)
-				req := NewExtentRequest(start, end, data[start-offset:end-offset], nil)
-				requests = append(requests, req)
-				return false
-			} else {
-				return true
-			}
+			return true
 		}
 	})
+
+	log.LogDebugf("PrepareRequest: start(%v) end(%v)", start, end)
+	if start < end {
+		// add hole (start, end)
+		req := NewExtentRequest(start, end-start, data[start-offset:end-offset], nil)
+		requests = append(requests, req)
+	}
 
 	return requests
 }

@@ -104,7 +104,6 @@ func (client *ExtentClient) Write(inode uint64, offset int, data []byte) (write 
 	<-request.done
 	err = request.err
 	write = request.canWrite
-	write += request.cutSize
 	if err != nil {
 		prefix := fmt.Sprintf("inodewrite %v_%v_%v", inode, offset, len(data))
 		err = errors.Annotatef(err, prefix)

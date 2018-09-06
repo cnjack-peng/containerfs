@@ -261,6 +261,7 @@ func (mw *MetaWrapper) AppendExtentKey(inode uint64, ek proto.ExtentKey) error {
 		log.LogErrorf("AppendExtentKey: inode(%v) ek(%v) err(%v) status(%v)", inode, ek, err, status)
 		return statusToErrno(status)
 	}
+	log.LogDebugf("AppendExtentKey: ino(%v) ek(%v)", inode, ek)
 	return nil
 }
 
@@ -275,6 +276,7 @@ func (mw *MetaWrapper) GetExtents(inode uint64) (gen uint64, size uint64, extent
 		log.LogErrorf("GetExtents: err(%v) status(%v)", err, status)
 		return 0, 0, nil, statusToErrno(status)
 	}
+	log.LogDebugf("GetExtents: ino(%v) gen(%v) size(%v) extents(%v)", inode, gen, size, extents)
 	return gen, size, extents, nil
 }
 

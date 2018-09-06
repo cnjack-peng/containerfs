@@ -16,14 +16,11 @@ package stream
 
 import (
 	"fmt"
-	//"github.com/juju/errors"
 	"github.com/tiglabs/containerfs/proto"
-	//"github.com/tiglabs/containerfs/util"
-	//"github.com/tiglabs/containerfs/util/log"
-	//"io"
+	"github.com/tiglabs/containerfs/util/log"
+	"io"
 	"math/rand"
 	"sync"
-	//"sync/atomic"
 )
 
 type ReadRequest struct {
@@ -91,12 +88,23 @@ func (stream *StreamReader) read(data []byte, offset int, size int) (total int, 
 		return
 	}
 	requests := stream.extents.PrepareRequest(offset, size, data)
+	log.LogDebugf("stream read: requests(%v)", requests)
 	for _, req := range requests {
 		if req.ExtentKey == nil {
-			// Reading a hole, just fill zero
+			filesize := int(stream.extents.Size())
+
 			for i, _ := range req.Data {
 				req.Data[i] = 0
 			}
+
+			if req.FileOffset+req.Size > filesize {
+				req.Size = filesize - req.FileOffset
+				total += req.Size
+				err = io.EOF
+				return
+			}
+
+			// Reading a hole, just fill zero
 			total += req.Size
 		} else {
 			reader, err := stream.GetExtentReader(req.ExtentKey)
