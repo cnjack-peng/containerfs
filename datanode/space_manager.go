@@ -23,6 +23,7 @@ import (
 	"os"
 
 	"github.com/tiglabs/containerfs/proto"
+	"github.com/tiglabs/containerfs/raftstore"
 	"github.com/tiglabs/containerfs/util/log"
 )
 
@@ -32,15 +33,20 @@ type SpaceManager interface {
 	GetPartition(partitionId uint32) (dp DataPartition)
 	Stats() *Stats
 	GetDisks() []*Disk
-	CreatePartition(volId string, partitionId uint32, storeSize int, storeType string) (DataPartition, error)
+	CreatePartition(request *proto.CreateDataPartitionRequest) (DataPartition, error)
 	DeletePartition(partitionId uint32)
 	RangePartitions(f func(partition DataPartition) bool)
+	SetRaftStore(raftStore raftstore.RaftStore)
+	GetRaftStore() (raftStore raftstore.RaftStore)
+	SetNodeId(nodeId uint64)
 	Stop()
 }
 
 type spaceManager struct {
 	disks       map[string]*Disk
 	partitions  map[uint32]DataPartition
+	raftStore   raftstore.RaftStore
+	nodeId      uint64
 	diskMu      sync.RWMutex
 	partitionMu sync.RWMutex
 	stats       *Stats
@@ -67,6 +73,17 @@ func (space *spaceManager) Stop() {
 		recover()
 	}()
 	close(space.stopC)
+}
+
+func (space *spaceManager) SetNodeId(nodeId uint64) {
+	space.nodeId = nodeId
+}
+
+func (space *spaceManager) SetRaftStore(raftStore raftstore.RaftStore) {
+	space.raftStore = raftStore
+}
+func (space *spaceManager) GetRaftStore() (raftStore raftstore.RaftStore) {
+	return space.raftStore
 }
 
 func (space *spaceManager) RangePartitions(f func(partition DataPartition) bool) {
@@ -273,15 +290,26 @@ func (space *spaceManager) putPartition(dp DataPartition) {
 	return
 }
 
-func (space *spaceManager) CreatePartition(volId string, partitionId uint32, storeSize int, storeType string) (dp DataPartition, err error) {
-	if space.GetPartition(partitionId) != nil {
+func (space *spaceManager) CreatePartition(request *proto.CreateDataPartitionRequest) (dp DataPartition, err error) {
+	dpCfg := &dataPartitionCfg{
+		PartitionId:   uint32(request.PartitionId),
+		VolName:       request.VolumeId,
+		Peers:         request.Members,
+		RaftStore:     space.raftStore,
+		NodeId:        space.nodeId,
+		PartitionSize: request.PartitionSize,
+		PartitionType: request.PartitionType,
+		RandomWrite:   request.RandomWrite,
+	}
+
+	if space.GetPartition(dpCfg.PartitionId) != nil {
 		return
 	}
 	disk := space.getMinPartitionCntDisk()
-	if disk == nil || disk.Available < uint64(storeSize) {
+	if disk == nil || disk.Available < uint64(dpCfg.PartitionSize) {
 		return nil, ErrNoDiskForCreatePartition
 	}
-	if dp, err = CreateDataPartition(volId, partitionId, disk, storeSize, storeType); err != nil {
+	if dp, err = CreateDataPartition(dpCfg, disk); err != nil {
 		return
 	}
 

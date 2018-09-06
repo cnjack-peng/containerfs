@@ -61,6 +61,7 @@ const (
 	OpSyncDelNeedle           uint8 = 0x0C
 	OpNotifyCompact           uint8 = 0x0D
 	OpGetDataPartitionMetrics uint8 = 0x0E
+	OpRandomWrite             uint8 = 0x0F
 
 	// Operations: Client -> MetaNode.
 	OpMetaCreateInode   uint8 = 0x20

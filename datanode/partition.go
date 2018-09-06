@@ -30,13 +30,16 @@ import (
 	"github.com/juju/errors"
 	"github.com/tiglabs/containerfs/master"
 	"github.com/tiglabs/containerfs/proto"
+	"github.com/tiglabs/containerfs/raftstore"
 	"github.com/tiglabs/containerfs/storage"
 	"github.com/tiglabs/containerfs/util/log"
+	"sort"
 )
 
 const (
 	DataPartitionPrefix       = "datapartition"
 	DataPartitionMetaFileName = "META"
+	TempMetaFileName          = ".meta"
 	TimeLayout                = "2006-01-02 15:04:05"
 )
 
@@ -51,7 +54,7 @@ var (
 type DataPartition interface {
 	ID() uint32
 	Path() string
-	IsLeader() bool
+	IsLeader() (leaderAddr string, ok bool)
 	ReplicaHosts() []string
 	Disk() *Disk
 
@@ -61,6 +64,7 @@ type DataPartition interface {
 
 	Status() int
 	ChangeStatus(status int)
+	StoreMeta() (err error)
 
 	GetExtentStore() *storage.ExtentStore
 	GetTinyStore() *storage.TinyStore
@@ -74,6 +78,8 @@ type DataPartition interface {
 	MergeRepair(metas *MembersFileMetas)
 
 	FlushDelete() error
+	StartRaft() (err error)
+	RndWrtSubmit(pkg *Packet) (err error)
 
 	AddWriteMetrics(latency uint64)
 	AddReadMetrics(latency uint64)
@@ -87,6 +93,21 @@ type dataPartitionMeta struct {
 	PartitionId   uint32
 	PartitionSize int
 	CreateTime    string
+	RandomWrite   bool
+	Peers         []proto.Peer
+}
+
+type sortPeers []proto.Peer
+
+func (sp sortPeers) Len() int {
+	return len(sp)
+}
+func (sp sortPeers) Less(i, j int) bool {
+	return sp[i].ID < sp[j].ID
+}
+
+func (sp sortPeers) Swap(i, j int) {
+	sp[i], sp[j] = sp[j], sp[i]
 }
 
 func (meta *dataPartitionMeta) Validate() (err error) {
@@ -112,39 +133,29 @@ type dataPartition struct {
 	used            int
 	extentStore     *storage.ExtentStore
 	tinyStore       *storage.TinyStore
+	raftPartition   raftstore.Partition
+	config          *dataPartitionCfg
+	applyId         uint64
 	stopC           chan bool
 
 	runtimeMetrics *DataPartitionMetrics
 }
 
-func CreateDataPartition(volId string, partitionId uint32, disk *Disk, size int, partitionType string) (dp DataPartition, err error) {
+func CreateDataPartition(dpCfg *dataPartitionCfg, disk *Disk) (dp DataPartition, err error) {
 
-	if dp, err = newDataPartition(volId, partitionId, disk, size); err != nil {
+	if dp, err = newDataPartition(dpCfg, disk); err != nil {
 		return
 	}
+
+	// Start raft for random write
+	if dpCfg.RandomWrite {
+		if err = dp.StartRaft(); err != nil {
+			return
+		}
+	}
+
 	// Store meta information into meta file.
-	var (
-		metaFile *os.File
-		metaData []byte
-	)
-	metaFilePath := path.Join(dp.Path(), DataPartitionMetaFileName)
-	if metaFile, err = os.OpenFile(metaFilePath, os.O_CREATE|os.O_RDWR, 0666); err != nil {
-		return
-	}
-	defer metaFile.Close()
-	meta := &dataPartitionMeta{
-		VolumeId:      volId,
-		PartitionId:   partitionId,
-		PartitionType: partitionType,
-		PartitionSize: size,
-		CreateTime:    time.Now().Format(TimeLayout),
-	}
-	if metaData, err = json.Marshal(meta); err != nil {
-		return
-	}
-	if _, err = metaFile.Write(metaData); err != nil {
-		return
-	}
+	err = dp.StoreMeta()
 	return
 }
 
@@ -165,27 +176,47 @@ func LoadDataPartition(partitionDir string, disk *Disk) (dp DataPartition, err e
 	if err = meta.Validate(); err != nil {
 		return
 	}
-	dp, err = newDataPartition(meta.VolumeId, meta.PartitionId, disk, meta.PartitionSize)
+
+	dpCfg := &dataPartitionCfg{
+		VolName:       meta.VolumeId,
+		PartitionSize: meta.PartitionSize,
+		PartitionId:   meta.PartitionId,
+		RandomWrite:   meta.RandomWrite,
+		Peers:         meta.Peers,
+		RaftStore:     disk.space.GetRaftStore(),
+	}
+	if dp, err = newDataPartition(dpCfg, disk); err != nil {
+		return
+	}
+
+	if dpCfg.RandomWrite {
+		if err = dp.StartRaft(); err != nil {
+			return
+		}
+	}
 	return
 }
 
-func newDataPartition(volumeId string, partitionId uint32, disk *Disk, size int) (dp DataPartition, err error) {
+func newDataPartition(dpCfg *dataPartitionCfg, disk *Disk) (dp DataPartition, err error) {
+	partitionId := dpCfg.PartitionId
+	dataPath := path.Join(disk.Path, fmt.Sprintf(DataPartitionPrefix+"_%v_%v", partitionId, dpCfg.PartitionSize))
 	partition := &dataPartition{
-		volumeId:        volumeId,
+		volumeId:        dpCfg.VolName,
 		partitionId:     partitionId,
 		disk:            disk,
-		path:            path.Join(disk.Path, fmt.Sprintf(DataPartitionPrefix+"_%v_%v", partitionId, size)),
-		partitionSize:   size,
+		path:            dataPath,
+		partitionSize:   dpCfg.PartitionSize,
 		replicaHosts:    make([]string, 0),
 		stopC:           make(chan bool, 0),
 		partitionStatus: proto.ReadWrite,
 		runtimeMetrics:  NewDataPartitionMetrics(),
+		config:          dpCfg,
 	}
-	partition.extentStore, err = storage.NewExtentStore(partition.path, size)
+	partition.extentStore, err = storage.NewExtentStore(partition.path, dpCfg.PartitionSize)
 	if err != nil {
 		return
 	}
-	partition.tinyStore, err = storage.NewTinyStore(partition.path, size)
+	partition.tinyStore, err = storage.NewTinyStore(partition.path, dpCfg.PartitionSize)
 	if err != nil {
 		return
 	}
@@ -203,8 +234,19 @@ func (dp *dataPartition) Path() string {
 	return dp.path
 }
 
-func (dp *dataPartition) IsLeader() bool {
-	return dp.isLeader
+func (dp *dataPartition) IsLeader() (leaderAddr string, ok bool) {
+	leaderID, _ := dp.raftPartition.LeaderTerm()
+	if leaderID == 0 {
+		return
+	}
+	ok = leaderID == dp.config.NodeId
+	for _, peer := range dp.config.Peers {
+		if leaderID == peer.ID {
+			leaderAddr = peer.Addr
+			return
+		}
+	}
+	return
 }
 
 func (dp *dataPartition) ReplicaHosts() []string {
@@ -251,6 +293,45 @@ func (dp *dataPartition) ChangeStatus(status int) {
 	case proto.ReadOnly, proto.ReadWrite, proto.Unavaliable:
 		dp.partitionStatus = status
 	}
+}
+
+func (dp *dataPartition) StoreMeta() (err error) {
+	// Store meta information into meta file.
+	var (
+		metaFile *os.File
+		metaData []byte
+	)
+	tempFileName := path.Join(dp.Path(), TempMetaFileName)
+	if metaFile, err = os.OpenFile(tempFileName, os.O_CREATE|os.O_RDWR, 0666); err != nil {
+		return
+	}
+	defer func() {
+		metaFile.Sync()
+		metaFile.Close()
+		os.Remove(tempFileName)
+	}()
+
+	sp := sortPeers(dp.config.Peers)
+	sort.Sort(sp)
+
+	meta := &dataPartitionMeta{
+		VolumeId:      dp.config.VolName,
+		PartitionId:   dp.config.PartitionId,
+		PartitionType: dp.config.PartitionType,
+		PartitionSize: dp.config.PartitionSize,
+		Peers:         dp.config.Peers,
+		RandomWrite:   dp.config.RandomWrite,
+		CreateTime:    time.Now().Format(TimeLayout),
+	}
+	if metaData, err = json.Marshal(meta); err != nil {
+		return
+	}
+	if _, err = metaFile.Write(metaData); err != nil {
+		return
+	}
+
+	err = os.Rename(tempFileName, path.Join(dp.Path(), DataPartitionMetaFileName))
+	return
 }
 
 func (dp *dataPartition) statusUpdateScheduler() {

@@ -142,8 +142,7 @@ func (s *DataNode) handleCreateDataPartition(pkg *Packet) {
 	if task.OpCode == proto.OpCreateDataPartition {
 		bytes, _ := json.Marshal(task.Request)
 		json.Unmarshal(bytes, request)
-		if _, err := s.space.CreatePartition(request.VolumeId, uint32(request.PartitionId),
-			request.PartitionSize, request.PartitionType); err != nil {
+		if _, err := s.space.CreatePartition(request); err != nil {
 			response.PartitionId = uint64(request.PartitionId)
 			response.Status = proto.TaskFail
 			response.Result = err.Error()
@@ -323,6 +322,45 @@ func (s *DataNode) handleWrite(pkg *Packet) {
 			proto.Buffers.Put(pkg.Data)
 		}
 	}
+	return
+}
+
+// Handle random opWrite packet.
+func (s *DataNode) handleRndOpWrite(pkg *Packet) {
+	var err error
+	defer func() {
+		if err != nil {
+			err = errors.Annotatef(err, "Request[%v] Write Error", pkg.GetUniqueLogId())
+			pkg.PackErrorBody(LogWrite, err.Error())
+		} else {
+			pkg.PackOkReply()
+		}
+	}()
+
+	leaderAddr, isLeader := pkg.DataPartition.IsLeader()
+	if leaderAddr == "" {
+		err = storage.ErrNoLeader
+		return
+	}
+	if !isLeader {
+		err = storage.ErrNotLeader
+		return
+	}
+	if pkg.DataPartition.Status() == proto.ReadOnly {
+		err = storage.ErrorPartitionReadOnly
+		return
+	}
+	if pkg.DataPartition.Available() <= 0 {
+		err = storage.ErrSyscallNoSpace
+		return
+	}
+
+	err = pkg.DataPartition.RndWrtSubmit(pkg)
+	s.addDiskErrs(pkg.PartitionID, err, WriteFlag)
+	if err == nil && pkg.Opcode == proto.OpWrite && pkg.Size == util.BlockSize {
+		proto.Buffers.Put(pkg.Data)
+	}
+
 	return
 }
 

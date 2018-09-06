@@ -100,3 +100,7 @@ const (
 	LogTask              = "Master Task:"
 	LogGetFlow           = "GetFlowInfo:"
 )
+
+const (
+	opRandomWrite   uint32 = iota
+)

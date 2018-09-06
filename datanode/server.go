@@ -136,14 +136,17 @@ func (s *DataNode) onStart(cfg *config.Config) (err error) {
 
 	go s.registerProfHandler()
 
+	s.registerToMaster()
+
+	if err = s.startRaftServer(cfg); err != nil {
+		return
+	}
 	if err = s.startSpaceManager(cfg); err != nil {
 		return
 	}
 	if err = s.startTcpService(); err != nil {
 		return
 	}
-
-	go s.registerToMaster()
 
 	ump.InitUmp(UmpModuleName)
 	return
@@ -195,6 +198,10 @@ func (s *DataNode) startSpaceManager(cfg *config.Config) (err error) {
 		err = ErrBadConfFile
 		return
 	}
+
+	s.space.SetRaftStore(s.raftStore)
+	s.space.SetNodeId(s.nodeId)
+
 	var wg sync.WaitGroup
 	for _, d := range cfg.GetArray(ConfigKeyDisks) {
 		log.LogDebugf("action[startSpaceManager] load disk raw config[%v].", d)
@@ -261,8 +268,8 @@ func (s *DataNode) registerToMaster() {
 				continue
 			}
 
-			//TODO: need get nodeId from master response
-			//s.startRaftServer(cfg)
+			nodeId := strings.TrimSpace(string(data))
+			s.nodeId, err = strconv.ParseUint(nodeId, 10, 64)
 			return
 		case <-s.stopC:
 			timer.Stop()
