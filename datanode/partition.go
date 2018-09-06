@@ -264,7 +264,7 @@ func (dp *dataPartition) statusUpdateScheduler() {
 			ticker.Stop()
 			return
 		case <-metricTicker.C:
-			dp.runtimeMetrics.recomputLatency()
+			dp.runtimeMetrics.recomputeLatency()
 		}
 	}
 }
