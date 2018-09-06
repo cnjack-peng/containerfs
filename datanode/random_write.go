@@ -1,59 +1,153 @@
 package datanode
 
 import (
-	"github.com/juju/errors"
-	"github.com/tiglabs/containerfs/raftstore"
-	"github.com/tiglabs/containerfs/util/config"
-	"github.com/tiglabs/containerfs/util/log"
 	_ "net/http/pprof"
-	"os"
-	"strconv"
+
+	"bytes"
+	"encoding/binary"
+	"encoding/json"
+	"io"
+
+	"github.com/tiglabs/containerfs/proto"
+	"github.com/tiglabs/containerfs/util/log"
 )
 
-//random write need start raft server
-func (s *DataNode) parseRaftConfig(cfg *config.Config) (err error) {
-	s.raftDir = cfg.GetString(ConfigKeyRaftDir)
-	if s.raftDir == "" {
-		s.raftDir = DefaultRaftDir
-	}
-	s.raftHeartbeat = cfg.GetString(ConfigKeyRaftHeartbeat)
-	s.raftReplicate = cfg.GetString(ConfigKeyRaftReplicate)
+type RndWrtCmdItem struct {
+	Op uint32 `json:"op"`
+	K  []byte `json:"k"`
+	V  []byte `json:"v"`
+}
 
-	log.LogDebugf("[parseRaftConfig] load raftDir[%v].", s.raftDir)
-	log.LogDebugf("[parseRaftConfig] load raftHearbeat[%v].", s.raftHeartbeat)
-	log.LogDebugf("[parseRaftConfig] load raftReplicate[%v].", s.raftReplicate)
+type rndWrtOpItem struct {
+	extentId uint64
+	offset   int64
+	size     int64
+	data     []byte
+	crc      uint32
+}
+
+// Marshal random write value to binary data.
+// Binary frame structure:
+//  +------+----+------+------+------+------+------+
+//  | Item | extentId | offset | size | crc | data |
+//  +------+----+------+------+------+------+------+
+//  | byte |     8    |    8   |  8   |  4  | size |
+//  +------+----+------+------+------+------+------+
+func rndWrtDataMarshal(extentId uint64, offset, size int64, data []byte, crc uint32) (result []byte, err error) {
+	buff := bytes.NewBuffer(make([]byte, 0))
+	buff.Grow(8 + 8*2 + 4 + int(size))
+	if err = binary.Write(buff, binary.BigEndian, extentId); err != nil {
+		return
+	}
+	if err = binary.Write(buff, binary.BigEndian, offset); err != nil {
+		return
+	}
+	if err = binary.Write(buff, binary.BigEndian, size); err != nil {
+		return
+	}
+	if err = binary.Write(buff, binary.BigEndian, crc); err != nil {
+		return
+	}
+	if _, err = buff.Write(data); err != nil {
+		return
+	}
+	result = buff.Bytes()
 	return
 }
 
-func (s *DataNode) startRaftServer(cfg *config.Config) (err error) {
-	log.LogInfo("Start: startRaftServer")
+func rndWrtDataUnmarshal(raw []byte) (result *rndWrtOpItem, err error) {
+	var opItem rndWrtOpItem
 
-	if _, err = os.Stat(s.raftDir); err != nil {
-		if err = os.MkdirAll(s.raftDir, 0755); err != nil {
-			err = errors.Errorf("create raft server dir: %s", err.Error())
-			return
-		}
+	buff := bytes.NewBuffer(raw)
+	if err = binary.Read(buff, binary.BigEndian, &opItem.extentId); err != nil {
+		return
+	}
+	if err = binary.Read(buff, binary.BigEndian, &opItem.offset); err != nil {
+		return
+	}
+	if err = binary.Read(buff, binary.BigEndian, &opItem.size); err != nil {
+		return
+	}
+	if err = binary.Read(buff, binary.BigEndian, &opItem.crc); err != nil {
+		return
+	}
+	opItem.data = make([]byte, opItem.size)
+	if _, err = buff.Read(opItem.data); err != nil {
+		return
 	}
 
-	heartbeatPort, _ := strconv.Atoi(s.raftHeartbeat)
-	replicatePort, _ := strconv.Atoi(s.raftReplicate)
+	result = &opItem
+	return
+}
 
-	raftConf := &raftstore.Config{
-		NodeID:        s.nodeId,
-		WalPath:       s.raftDir,
-		IpAddr:        s.localIp,
-		HeartbeatPort: heartbeatPort,
-		ReplicatePort: replicatePort,
-	}
-	s.raftStore, err = raftstore.NewRaftStore(raftConf)
+func (rndWrtItem *RndWrtCmdItem) rndWrtCmdMarshalJson() (cmd []byte, err error) {
+	return json.Marshal(rndWrtItem)
+}
+
+func (rndWrtItem *RndWrtCmdItem) rndWrtCmdUnmarshal(cmd []byte) (err error) {
+	return json.Unmarshal(cmd, rndWrtItem)
+}
+
+func (dp *dataPartition) RndWrtSubmit(pkg *Packet) (err error) {
+	val, err := rndWrtDataMarshal(pkg.FileID, pkg.Offset, int64(pkg.Size), pkg.Data, pkg.Crc)
 	if err != nil {
-		err = errors.Errorf("new raftStore: %s", err.Error())
+		return
+	}
+	resp, err := dp.Put(opRandomWrite, val)
+	if err != nil {
+		return
+	}
+
+	pkg.ResultCode = resp.(uint8)
+	log.LogDebugf("[rndWrtSubmit] raft sync: response status = %v.", pkg.GetResultMesg())
+	return
+}
+
+func (dp *dataPartition) rndWrtStore(opItem *rndWrtOpItem) (status uint8) {
+	status = proto.OpOk
+	err := dp.GetExtentStore().Write(opItem.extentId, opItem.offset, opItem.size, opItem.data, opItem.crc)
+	if err != nil {
+		log.LogError("[rndWrtStore] write err", err)
+		status = proto.OpExistErr
 	}
 	return
 }
 
-func (s *DataNode) stopRaftServer() {
-	if s.raftStore != nil {
-		s.raftStore.Stop()
+type ItemIterator struct {
+	applyID uint64
+	cur     int
+	total   int
+}
+
+func NewItemIterator(applyID uint64) *ItemIterator {
+	si := new(ItemIterator)
+	si.applyID = applyID
+	return si
+}
+
+func (si *ItemIterator) ApplyIndex() uint64 {
+	return si.applyID
+}
+
+func (si *ItemIterator) Close() {
+	si.cur = si.total + 1
+	return
+}
+
+func (si *ItemIterator) Next() (data []byte, err error) {
+	if si.cur > si.total {
+		err = io.EOF
+		data = nil
+		return
 	}
+	// First Send ApplyIndex
+	if si.cur == 0 {
+		appIdBuf := make([]byte, 8)
+		binary.BigEndian.PutUint64(appIdBuf, si.applyID)
+		data = appIdBuf[:]
+		si.cur++
+		return
+	}
+
+	return
 }

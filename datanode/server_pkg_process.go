@@ -22,6 +22,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/tiglabs/containerfs/proto"
 	"github.com/tiglabs/containerfs/storage"
+	"github.com/tiglabs/containerfs/util"
 	"github.com/tiglabs/containerfs/util/log"
 )
 
@@ -93,7 +94,47 @@ func (s *DataNode) handleRequest(msgH *MessageHandler) {
 	}
 }
 
-func (s *DataNode) doRequestCh(req *Packet, msgH *MessageHandler) {
+func (s *DataNode) randomOpReq(pkg *Packet, msgH *MessageHandler) {
+	var err error
+	defer func() {
+		if err != nil {
+			err = errors.Annotatef(err, "Request[%v] Write Error", pkg.GetUniqueLogId())
+			pkg.PackErrorBody(LogWrite, err.Error())
+		} else {
+			pkg.PackOkReply()
+		}
+
+		msgH.replyCh <- pkg
+	}()
+
+	leaderAddr, isLeader := pkg.DataPartition.IsLeader()
+	if leaderAddr == "" {
+		err = storage.ErrNoLeader
+		return
+	}
+	if !isLeader {
+		err = storage.ErrNotLeader
+		return
+	}
+	if pkg.DataPartition.Status() == proto.ReadOnly {
+		err = storage.ErrorPartitionReadOnly
+		return
+	}
+	if pkg.DataPartition.Available() <= 0 {
+		err = storage.ErrSyscallNoSpace
+		return
+	}
+
+	err = pkg.DataPartition.RndWrtSubmit(pkg)
+	s.addDiskErrs(pkg.PartitionID, err, WriteFlag)
+	if err == nil && pkg.Opcode == proto.OpWrite && pkg.Size == util.BlockSize {
+		proto.Buffers.Put(pkg.Data)
+	}
+
+	return
+}
+
+func (s *DataNode) sequenceOpReq(req *Packet, msgH *MessageHandler) {
 	var err error
 	if !req.IsTransitPkg() {
 		s.operatePacket(req, msgH.inConn)
@@ -114,6 +155,16 @@ func (s *DataNode) doRequestCh(req *Packet, msgH *MessageHandler) {
 	}
 	msgH.handleCh <- single
 
+	return
+}
+
+func (s *DataNode) doRequestCh(req *Packet, msgH *MessageHandler) {
+	if req.Opcode == proto.OpRandomWrite {
+		s.randomOpReq(req, msgH)
+		return
+	}
+
+	s.sequenceOpReq(req, msgH)
 	return
 }
 
