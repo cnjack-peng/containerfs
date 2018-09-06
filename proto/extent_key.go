@@ -36,7 +36,7 @@ type ExtentKey struct {
 	Crc         uint32
 }
 
-func (k *ExtentKey) String() string {
+func (k ExtentKey) String() string {
 	return fmt.Sprintf("ExtentKey{FileOffset(%v),Partition(%v),ExtentID(%v),Size(%v),CRC(%v)}", k.FileOffset, k.PartitionId, k.ExtentId, k.Size, k.Crc)
 }
 

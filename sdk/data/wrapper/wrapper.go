@@ -32,7 +32,7 @@ const (
 	DataPartitionViewUrl        = "/client/dataPartitions"
 	GetClusterInfoURL           = "/admin/getIp"
 	ActionGetDataPartitionView  = "ActionGetDataPartitionView"
-	MinWritableDataPartitionNum = 10
+	MinWritableDataPartitionNum = 1
 )
 
 var (

@@ -173,12 +173,15 @@ func (stream *StreamWriter) handleRequest(request interface{}) {
 }
 
 func (stream *StreamWriter) write(data []byte, offset, size int) (total int, err error) {
+	log.LogDebugf("stream write: offset(%v) size(%v)", offset, size)
 	err = stream.extents.Refresh(stream.Inode, stream.client.getExtents)
 	if err != nil {
+		log.LogErrorf("stream write: err(%v)", err)
 		return
 	}
 
 	requests := stream.extents.PrepareRequest(offset, size, data)
+	log.LogDebugf("stream write: requests(%v)", requests)
 	for _, req := range requests {
 		var writeSize int
 		if req.ExtentKey != nil {
@@ -187,10 +190,15 @@ func (stream *StreamWriter) write(data []byte, offset, size int) (total int, err
 			writeSize, err = stream.doWrite(req.Data, req.FileOffset, req.Size)
 		}
 		if err != nil {
+			log.LogErrorf("stream write: err(%v)", err)
 			break
 		}
 		total += writeSize
 	}
+	if offset+total > int(stream.extents.Size()) {
+		stream.extents.SetSize(uint64(offset + total))
+	}
+	log.LogDebugf("stream write: total(%v) err(%v)", total, err)
 	return
 }
 
