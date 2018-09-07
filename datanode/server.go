@@ -270,6 +270,7 @@ func (s *DataNode) registerToMaster() {
 
 			nodeId := strings.TrimSpace(string(data))
 			s.nodeId, err = strconv.ParseUint(nodeId, 10, 64)
+			log.LogDebug("[tempDebug] nodeId=%v", s.nodeId)
 			return
 		case <-s.stopC:
 			timer.Stop()

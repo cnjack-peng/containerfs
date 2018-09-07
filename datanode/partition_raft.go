@@ -169,6 +169,8 @@ func (s *DataNode) parseRaftConfig(cfg *config.Config) (err error) {
 func (s *DataNode) startRaftServer(cfg *config.Config) (err error) {
 	log.LogInfo("Start: startRaftServer")
 
+	s.parseRaftConfig(cfg)
+
 	if _, err = os.Stat(s.raftDir); err != nil {
 		if err = os.MkdirAll(s.raftDir, 0755); err != nil {
 			err = errors.Errorf("create raft server dir: %s", err.Error())
@@ -176,8 +178,6 @@ func (s *DataNode) startRaftServer(cfg *config.Config) (err error) {
 			return
 		}
 	}
-
-	s.parseRaftConfig(cfg)
 
 	heartbeatPort, _ := strconv.Atoi(s.raftHeartbeat)
 	replicatePort, _ := strconv.Atoi(s.raftReplicate)
