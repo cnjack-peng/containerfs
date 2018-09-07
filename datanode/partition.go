@@ -261,6 +261,7 @@ func (dp *dataPartition) Stop() {
 	dp.extentStore.Close()
 	dp.tinyStore.CloseAll()
 
+	dp.stopRaft()
 }
 
 func (dp *dataPartition) FlushDelete() (err error) {
