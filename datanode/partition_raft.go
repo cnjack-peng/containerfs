@@ -83,6 +83,13 @@ func (dp *dataPartition) StartRaft() (err error) {
 	return
 }
 
+func (dp *dataPartition) stopRaft() {
+	if dp.raftPartition != nil {
+		dp.raftPartition.Stop()
+	}
+	return
+}
+
 func (dp *dataPartition) confAddNode(req *proto.DataPartitionOfflineRequest, index uint64) (updated bool, err error) {
 	var (
 		heartbeatPort int
