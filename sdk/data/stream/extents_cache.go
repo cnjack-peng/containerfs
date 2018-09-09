@@ -148,13 +148,21 @@ func (cache *ExtentCache) Get(offset uint64) (ret *proto.ExtentKey) {
 func (cache *ExtentCache) PrepareRequest(offset, size int, data []byte) []*ExtentRequest {
 	requests := make([]*ExtentRequest, 0)
 	pivot := &proto.ExtentKey{FileOffset: uint64(offset)}
+	upper := &proto.ExtentKey{FileOffset: uint64(offset + size)}
 	start := offset
 	end := offset + size
 
 	cache.RLock()
 	defer cache.RUnlock()
 
-	cache.root.AscendGreaterOrEqual(pivot, func(i btree.Item) bool {
+	var lower *proto.ExtentKey
+	cache.root.DescendLessOrEqual(pivot, func(i btree.Item) bool {
+		ek := i.(*proto.ExtentKey)
+		lower = ek
+		return false
+	})
+
+	cache.root.AscendRange(lower, upper, func(i btree.Item) bool {
 		ek := i.(*proto.ExtentKey)
 		ekStart := int(ek.FileOffset)
 		ekEnd := int(ek.FileOffset) + int(ek.Size)
