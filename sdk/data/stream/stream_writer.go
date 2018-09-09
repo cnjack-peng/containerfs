@@ -173,7 +173,7 @@ func (stream *StreamWriter) handleRequest(request interface{}) {
 }
 
 func (stream *StreamWriter) write(data []byte, offset, size int) (total int, err error) {
-	log.LogDebugf("stream write: offset(%v) size(%v)", offset, size)
+	log.LogDebugf("stream write: ino(%v) offset(%v) size(%v)", stream.Inode, offset, size)
 	err = stream.extents.Refresh(stream.Inode, stream.client.getExtents)
 	if err != nil {
 		log.LogErrorf("stream write: err(%v)", err)
