@@ -76,6 +76,10 @@ func (sk *StreamKey) Marshal() (data []byte, err error) {
 	return json.Marshal(m)
 }
 
+func (sk *StreamKey) MarshalJSON() (data []byte, err error) {
+	return sk.Marshal()
+}
+
 func (sk *StreamKey) Put(key BtreeItem) (items []BtreeItem) {
 	ext := key.(*proto.ExtentKey)
 	lessFileOffset := ext.FileOffset + uint64(ext.Size)
