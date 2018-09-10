@@ -100,6 +100,9 @@ const (
 	opFSMCreateLinkInode
 	opFSMEvictInode
 	opFSMInternalDeleteInode
+	opFSMInternalDelExtentFile
+	opFSMInternalDelExtentCursor
+	opSnapExtentFile
 )
 
 var (
@@ -136,4 +139,11 @@ const (
 
 const (
 	storeTimeTicker = time.Minute * 5
+)
+
+const (
+	_  = iota
+	KB = 1 << (10 * iota)
+	MB
+	GB
 )
