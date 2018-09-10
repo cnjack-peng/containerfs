@@ -23,7 +23,8 @@ const (
 	GB
 	TB
 	PB
-	DefaultDataPartitionSize = 120 * GB
+	//todo remove after docker test
+	DefaultDataPartitionSize = 5 * GB
 	TaskWorkerInterval       = 1
 )
 
