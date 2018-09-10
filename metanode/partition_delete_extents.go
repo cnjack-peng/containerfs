@@ -20,6 +20,8 @@ const (
 	maxDeleteExtentSize = 10 * MB
 )
 
+var extentsFileHeader = []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08}
+
 func (mp *metaPartition) startDeleteExtents() {
 	fileList := list.New()
 	// start Append Delete Extents to File Worker
@@ -30,14 +32,12 @@ func (mp *metaPartition) startDeleteExtents() {
 
 func (mp *metaPartition) appendDelExtentsToFile(fileList *list.List) {
 	var (
-		fileName     string
-		fileSize     int64
-		idx          int64
-		fp           *os.File
-		err          error
-		cursorHeader [8]byte
+		fileName string
+		fileSize int64
+		idx      int64
+		fp       *os.File
+		err      error
 	)
-	binary.BigEndian.PutUint64(cursorHeader[:], 8)
 LOOP:
 	finfos, err := ioutil.ReadDir(mp.config.RootDir)
 	if err != nil {
@@ -57,7 +57,8 @@ LOOP:
 		if err != nil {
 			panic(err)
 		}
-		fp.Write(cursorHeader[:])
+		fp.Write(extentsFileHeader)
+		fileList.PushBack(fileName)
 	} else {
 		fileName = lastItem.Value.(string)
 		fp, err = os.OpenFile(path.Join(mp.config.RootDir, fileName),
@@ -97,10 +98,11 @@ LOOP:
 				if err != nil {
 					panic(err)
 				}
-				if _, err = fp.Write(cursorHeader[:]); err != nil {
+				if _, err = fp.Write(extentsFileHeader); err != nil {
 					panic(err)
 				}
 				fileSize = 8
+				fileList.PushBack(fileName)
 			}
 			// write file
 			if _, err = fp.Write(buf); err != nil {
