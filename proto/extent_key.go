@@ -51,7 +51,7 @@ func (k *ExtentKey) Marshal() (m string) {
 }
 
 func (k *ExtentKey) MarshalBinary() ([]byte, error) {
-	buf := bytes.NewBuffer(make([]byte, ExtentLength))
+	buf := bytes.NewBuffer(make([]byte, 0, ExtentLength))
 	if err := binary.Write(buf, binary.BigEndian, k.FileOffset); err != nil {
 		return nil, err
 	}
