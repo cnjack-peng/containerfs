@@ -30,12 +30,14 @@ func (mp *metaPartition) startDeleteExtents() {
 
 func (mp *metaPartition) appendDelExtentsToFile(fileList *list.List) {
 	var (
-		fileName string
-		fileSize int64
-		idx      int64
-		fp       *os.File
-		err      error
+		fileName     string
+		fileSize     int64
+		idx          int64
+		fp           *os.File
+		err          error
+		cursorHeader [8]byte
 	)
+	binary.BigEndian.PutUint64(cursorHeader[:], 8)
 LOOP:
 	finfos, err := ioutil.ReadDir(mp.config.RootDir)
 	if err != nil {
@@ -55,7 +57,7 @@ LOOP:
 		if err != nil {
 			panic(err)
 		}
-		fp.Write(make([]byte, 8))
+		fp.Write(cursorHeader[:])
 	} else {
 		fileName = lastItem.Value.(string)
 		fp, err = os.OpenFile(path.Join(mp.config.RootDir, fileName),
@@ -95,7 +97,7 @@ LOOP:
 				if err != nil {
 					panic(err)
 				}
-				if _, err = fp.Write(make([]byte, 8)); err != nil {
+				if _, err = fp.Write(cursorHeader[:]); err != nil {
 					panic(err)
 				}
 				fileSize = 8
@@ -111,6 +113,13 @@ LOOP:
 }
 
 func (mp *metaPartition) deleteExtentsFile(fileList *list.List) {
+	var (
+		element  *list.Element
+		fileName string
+		file     string
+		fileInfo os.FileInfo
+		err      error
+	)
 	for {
 		time.Sleep(10 * time.Minute)
 		select {
@@ -119,13 +128,13 @@ func (mp *metaPartition) deleteExtentsFile(fileList *list.List) {
 		default:
 		}
 	LOOP:
-		element := fileList.Front()
+		element = fileList.Front()
 		if element == nil {
 			continue
 		}
-		fileName := element.Value.(string)
-		file := path.Join(mp.config.RootDir, fileName)
-		if _, err := os.Stat(file); err != nil {
+		fileName = element.Value.(string)
+		file = path.Join(mp.config.RootDir, fileName)
+		if fileInfo, err = os.Stat(file); err != nil {
 			fileList.Remove(element)
 			goto LOOP
 		}
@@ -133,15 +142,16 @@ func (mp *metaPartition) deleteExtentsFile(fileList *list.List) {
 			log.LogDebugf("[deleteExtentsFile] not raft leader, please ignore")
 			continue
 		}
-
+		buf := make([]byte, MB)
 		fp, err := os.OpenFile(file, os.O_RDWR, 0644)
 		if err != nil {
 			panic(err)
 		}
 
-		// read cursor
-		buf := make([]byte, MB)
-		if _, err = io.ReadAtLeast(fp, buf, 8); err != nil {
+		if size := fileInfo.Size(); size < MB {
+			buf = buf[:size]
+		}
+		if _, err = fp.ReadAt(buf[:8], 0); err != nil {
 			log.LogWarnf("[deleteExtentsFile] read cursor least 8bytes, " +
 				"retry later")
 			fp.Close()
@@ -159,14 +169,16 @@ func (mp *metaPartition) deleteExtentsFile(fileList *list.List) {
 						RestoringSnapshot {
 						if _, err = mp.Put(opFSMInternalDelExtentFile,
 							[]byte(fileName)); err != nil {
-							log.LogErrorf("%s", err.Error())
+							log.LogErrorf(
+								"[deleteExtentsFile] delete old file: %s, "+
+									"status: %s", fileName, err.Error())
 						}
 						log.LogDebugf("[deleteExtentsFile] delete old file"+
 							": %s, status: %v", fileName, err == nil)
-					} else {
-						log.LogDebugf("[deleteExtentsFile] delete old file"+
-							" status: %s", status.State)
+						goto LOOP
 					}
+					log.LogDebugf("[deleteExtentsFile] delete old file"+
+						" status: %s", status.State)
 				} else {
 					log.LogDebugf("[deleteExtentsFile] %s extents delete ok",
 						fileName)
@@ -197,5 +209,6 @@ func (mp *metaPartition) deleteExtentsFile(fileList *list.List) {
 			log.LogWarnf("[deleteExtentsFile] %s", err.Error())
 		}
 		log.LogDebugf("[deleteExtentsFile] file=%s, cursor=%d", fileName, cursor)
+		goto LOOP
 	}
 }
