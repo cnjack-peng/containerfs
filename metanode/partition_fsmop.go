@@ -192,7 +192,7 @@ func (mp *metaPartition) setExtentDeleteFileCursor(buf []byte) (err error) {
 		fileName string
 		cursor   int64
 	)
-	_, err = fmt.Sscanf(str, "%s,%d", &fileName, &cursor)
+	_, err = fmt.Sscanf(str, "%s %d", &fileName, &cursor)
 	if err != nil {
 		return
 	}
