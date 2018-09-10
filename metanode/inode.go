@@ -57,7 +57,7 @@ type Inode struct {
 	LinkTarget []byte // SymLink target name
 	NLink      uint32 // NodeLink counts
 	MarkDelete uint8  // 0: false; 1: true
-	Extents    *proto.StreamKey
+	Extents    *StreamKey
 }
 
 func (i *Inode) String() string {
@@ -92,7 +92,7 @@ func NewInode(ino uint64, t uint32) *Inode {
 		AccessTime: ts,
 		ModifyTime: ts,
 		NLink:      1,
-		Extents:    proto.NewStreamKey(ino),
+		Extents:    NewStreamKey(),
 	}
 	if proto.IsDir(t) {
 		i.NLink = 2
@@ -214,15 +214,13 @@ func (i *Inode) MarshalValue() (val []byte) {
 	if err = binary.Write(buff, binary.BigEndian, &i.MarkDelete); err != nil {
 		panic(err)
 	}
-	if i.Extents.Size() != 0 {
-		// Marshal ExtentsKey
-		extData, err := i.Extents.MarshalBinary()
-		if err != nil {
-			panic(err)
-		}
-		if _, err = buff.Write(extData); err != nil {
-			panic(err)
-		}
+	// Marshal ExtentsKey
+	extData, err := i.Extents.MarshalBinary()
+	if err != nil {
+		panic(err)
+	}
+	if _, err = buff.Write(extData); err != nil {
+		panic(err)
 	}
 
 	val = buff.Bytes()
@@ -274,23 +272,25 @@ func (i *Inode) UnmarshalValue(val []byte) (err error) {
 	if err = binary.Read(buff, binary.BigEndian, &i.MarkDelete); err != nil {
 		return
 	}
-	if i.Extents == nil {
-		i.Extents = proto.NewStreamKey(i.Inode)
-	} else {
-		i.Extents.Inode = i.Inode
-	}
 	if buff.Len() == 0 {
 		return
 	}
 	// Unmarshal ExtentsKey
+	if i.Extents == nil {
+		i.Extents = NewStreamKey()
+	}
 	if err = i.Extents.UnmarshalBinary(buff.Bytes()); err != nil {
 		return
 	}
 	return
 }
 
-func (i *Inode) AppendExtents(ext proto.ExtentKey) {
-	i.Extents.Put(ext)
-	i.Size = i.Extents.Size()
+func (i *Inode) AppendExtents(ext BtreeItem) (items []BtreeItem) {
+	items = i.Extents.Put(ext)
+	size := i.Extents.Size()
+	if i.Size < size {
+		i.Size = size
+	}
 	i.ModifyTime = time.Now().Unix()
+	return
 }
