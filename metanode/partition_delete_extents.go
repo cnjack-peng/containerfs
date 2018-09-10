@@ -112,7 +112,7 @@ LOOP:
 
 func (mp *metaPartition) deleteExtentsFile(fileList *list.List) {
 	for {
-		time.Sleep(15 * time.Minute)
+		time.Sleep(10 * time.Minute)
 		select {
 		case <-mp.stopC:
 			return
@@ -130,6 +130,7 @@ func (mp *metaPartition) deleteExtentsFile(fileList *list.List) {
 			goto LOOP
 		}
 		if _, ok := mp.IsLeader(); !ok {
+			log.LogDebugf("[deleteExtentsFile] not raft leader, please ignore")
 			continue
 		}
 
@@ -160,7 +161,15 @@ func (mp *metaPartition) deleteExtentsFile(fileList *list.List) {
 							[]byte(fileName)); err != nil {
 							log.LogErrorf("%s", err.Error())
 						}
+						log.LogDebugf("[deleteExtentsFile] delete old file"+
+							": %s, status: %v", fileName, err == nil)
+					} else {
+						log.LogDebugf("[deleteExtentsFile] delete old file"+
+							" status: %s", status.State)
 					}
+				} else {
+					log.LogDebugf("[deleteExtentsFile] %s extents delete ok",
+						fileName)
 				}
 				continue
 			}
@@ -187,6 +196,6 @@ func (mp *metaPartition) deleteExtentsFile(fileList *list.List) {
 		if _, err = mp.Put(opFSMInternalDelExtentCursor, buff.Bytes()); err != nil {
 			log.LogWarnf("[deleteExtentsFile] %s", err.Error())
 		}
-
+		log.LogDebugf("[deleteExtentsFile] file=%s, cursor=%d", fileName, cursor)
 	}
 }
