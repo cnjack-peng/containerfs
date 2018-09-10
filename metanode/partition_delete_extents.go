@@ -214,7 +214,7 @@ func (mp *metaPartition) deleteExtentsFile(fileList *list.List) {
 			}
 		}
 		buff.Reset()
-		buff.WriteString(fmt.Sprintf("%s,%d", fileName, cursor))
+		buff.WriteString(fmt.Sprintf("%s %d", fileName, cursor))
 		if _, err = mp.Put(opFSMInternalDelExtentCursor, buff.Bytes()); err != nil {
 			log.LogWarnf("[deleteExtentsFile] %s", err.Error())
 		}
