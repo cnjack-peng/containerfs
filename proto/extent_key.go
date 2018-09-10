@@ -23,7 +23,10 @@ import (
 	"github.com/tiglabs/containerfs/util/btree"
 )
 
-var InvalidKey = errors.New("invalid key error")
+var (
+	ExtentLength = 28
+	InvalidKey   = errors.New("invalid key error")
+)
 
 type ExtentKey struct {
 	FileOffset  uint64
@@ -44,11 +47,11 @@ func (k *ExtentKey) Less(than btree.Item) bool {
 
 func (k *ExtentKey) Marshal() (m string) {
 	return fmt.Sprintf("%v_%v_%v_%v_%v", k.FileOffset, k.PartitionId, k.ExtentId,
-		k.Size,k.Crc)
+		k.Size, k.Crc)
 }
 
 func (k *ExtentKey) MarshalBinary() ([]byte, error) {
-	buf := bytes.NewBuffer(make([]byte, 0,28))
+	buf := bytes.NewBuffer(make([]byte, ExtentLength))
 	if err := binary.Write(buf, binary.BigEndian, k.FileOffset); err != nil {
 		return nil, err
 	}

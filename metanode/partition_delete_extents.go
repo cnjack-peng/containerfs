@@ -148,9 +148,6 @@ func (mp *metaPartition) deleteExtentsFile(fileList *list.List) {
 			panic(err)
 		}
 
-		if size := fileInfo.Size(); size < MB {
-			buf = buf[:size]
-		}
 		if _, err = fp.ReadAt(buf[:8], 0); err != nil {
 			log.LogWarnf("[deleteExtentsFile] read cursor least 8bytes, " +
 				"retry later")
@@ -158,6 +155,16 @@ func (mp *metaPartition) deleteExtentsFile(fileList *list.List) {
 			continue
 		}
 		cursor := binary.BigEndian.Uint64(buf)
+		if size := uint64(fileInfo.Size()) - cursor; size < MB {
+			if size <= 0 {
+				size = uint64(proto.ExtentLength)
+			} else if size > 0 && size < uint64(proto.ExtentLength) {
+				errStr := fmt.Sprintf("[deleteExtentsFile] %s file corrupted!", fileName)
+				log.LogErrorf(errStr)
+				panic(errStr)
+			}
+			buf = buf[:size]
+		}
 		n, err := fp.ReadAt(buf, int64(cursor))
 		fp.Close()
 		if err != nil {
@@ -187,10 +194,14 @@ func (mp *metaPartition) deleteExtentsFile(fileList *list.List) {
 			}
 			panic(err)
 		}
-		buff := bytes.NewBuffer(buf[:n])
+		buff := bytes.NewBuffer(buf)
+		cursor += uint64(n)
 		for {
 			if buff.Len() == 0 {
 				break
+			}
+			if buff.Len() < proto.ExtentLength {
+				cursor -= uint64(buff.Len())
 			}
 			ek := &proto.ExtentKey{}
 			if err = ek.UnmarshalBinary(buff); err != nil {
@@ -202,7 +213,6 @@ func (mp *metaPartition) deleteExtentsFile(fileList *list.List) {
 				log.LogWarnf("[deleteExtentsFile] %s", err.Error())
 			}
 		}
-		cursor += uint64(n)
 		buff.Reset()
 		buff.WriteString(fmt.Sprintf("%s,%d", fileName, cursor))
 		if _, err = mp.Put(opFSMInternalDelExtentCursor, buff.Bytes()); err != nil {
