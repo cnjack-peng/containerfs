@@ -51,7 +51,7 @@ LOOP:
 	if lastItem == nil {
 		fileName = fmt.Sprintf("%s_%d", prefixDelExtent, idx)
 		fp, err = os.OpenFile(path.Join(mp.config.RootDir, fileName),
-			os.O_CREATE|os.O_APPEND, 0644)
+			os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err != nil {
 			panic(err)
 		}
@@ -59,7 +59,7 @@ LOOP:
 	} else {
 		fileName = lastItem.Value.(string)
 		fp, err = os.OpenFile(path.Join(mp.config.RootDir, fileName),
-			os.O_CREATE|os.O_APPEND, 0644)
+			os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err != nil {
 			panic(err)
 		}
@@ -91,7 +91,7 @@ LOOP:
 				idx += 1
 				fileName = fmt.Sprintf("%s_%d", prefixDelExtent, idx)
 				fp, err = os.OpenFile(path.Join(mp.config.RootDir, fileName),
-					os.O_CREATE|os.O_APPEND, 0644)
+					os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 				if err != nil {
 					panic(err)
 				}
