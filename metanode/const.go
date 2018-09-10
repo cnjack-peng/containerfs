@@ -76,8 +76,6 @@ type (
 	UpdatePartitionResp = proto.UpdateMetaPartitionResponse
 	// Client -> MetaNode
 	ExtentsTruncateReq = proto.TruncateRequest
-	// MetaNode -> Client
-	ExtentsTruncateResp = proto.TruncateResponse
 
 	// Client -> MetaNode
 	EvictInodeReq = proto.EvictInodeRequest
