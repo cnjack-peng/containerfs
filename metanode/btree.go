@@ -130,6 +130,6 @@ func (b *BTree) Len() (size int) {
 func (b *BTree) MaxItem() BtreeItem {
 	b.RLock()
 	item := b.tree.Max()
-	b.Unlock()
+	b.RUnlock()
 	return item
 }
