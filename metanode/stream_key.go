@@ -89,11 +89,6 @@ func (sk *StreamKey) Put(key BtreeItem) (items []BtreeItem) {
 			items = append(items, item)
 			return true
 		})
-	if len(items) == 0 {
-		tx.TxReplaceOrInsert(key)
-		tx.TxClose()
-		return
-	}
 	// should Delete Items
 	for _, item := range items {
 		tx.TxDelete(item)

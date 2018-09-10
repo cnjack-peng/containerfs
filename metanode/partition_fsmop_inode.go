@@ -161,26 +161,24 @@ func (mp *metaPartition) internalDeleteInode(ino *Inode) {
 }
 
 func (mp *metaPartition) appendExtents(ino *Inode) (status uint8) {
-	exts := ino.Extents
 	status = proto.OpOk
 	item := mp.inodeTree.Get(ino)
 	if item == nil {
 		status = proto.OpNotExistErr
 		return
 	}
-	ino = item.(*Inode)
-	if ino.MarkDelete == 1 {
+	ino2 := item.(*Inode)
+	if ino2.MarkDelete == 1 {
 		status = proto.OpNotExistErr
 		return
 	}
-	modifyTime := ino.ModifyTime
 	var delItems []BtreeItem
-	exts.Range(func(item BtreeItem) bool {
-		delItems = ino.AppendExtents(item)
+	ino.Extents.Range(func(item BtreeItem) bool {
+		delItems = append(delItems, ino2.AppendExtents(item)...)
 		return true
 	})
-	ino.ModifyTime = modifyTime
-	ino.Generation++
+	ino2.ModifyTime = ino.ModifyTime
+	ino2.Generation++
 	for _, item := range delItems {
 		mp.extDelCh <- item
 	}
