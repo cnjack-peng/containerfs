@@ -202,6 +202,7 @@ func (mp *metaPartition) deleteExtentsFile(fileList *list.List) {
 			}
 			if buff.Len() < proto.ExtentLength {
 				cursor -= uint64(buff.Len())
+				break
 			}
 			ek := &proto.ExtentKey{}
 			if err = ek.UnmarshalBinary(buff); err != nil {
