@@ -350,11 +350,13 @@ func (s *DataNode) fillHeartBeatResponse(response *proto.DataNodeHeartBeatRespon
 	response.PartitionInfo = make([]*proto.PartitionReport, 0)
 	space := s.space
 	space.RangePartitions(func(partition DataPartition) bool {
+		_, isLeader := partition.IsLeader()
 		vr := &proto.PartitionReport{
 			PartitionID:     uint64(partition.ID()),
 			PartitionStatus: partition.Status(),
 			Total:           uint64(partition.Size()),
 			Used:            uint64(partition.Used()),
+			IsLeader:        isLeader,
 		}
 		response.PartitionInfo = append(response.PartitionInfo, vr)
 		return true
