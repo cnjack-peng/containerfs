@@ -92,6 +92,7 @@ func (dp *dataPartition) StartRaft() (err error) {
 		SM:      dp,
 	}
 
+	dp.config.RaftStore.ResetWalPath(dp.path)
 	dp.raftPartition, err = dp.config.RaftStore.CreatePartition(pc)
 
 	return
