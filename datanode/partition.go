@@ -184,6 +184,7 @@ func LoadDataPartition(partitionDir string, disk *Disk) (dp DataPartition, err e
 		RandomWrite:   meta.RandomWrite,
 		Peers:         meta.Peers,
 		RaftStore:     disk.space.GetRaftStore(),
+		NodeId:		   disk.space.GetNodeId(),
 	}
 	if dp, err = newDataPartition(dpCfg, disk); err != nil {
 		return

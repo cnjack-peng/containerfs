@@ -39,6 +39,7 @@ type SpaceManager interface {
 	SetRaftStore(raftStore raftstore.RaftStore)
 	GetRaftStore() (raftStore raftstore.RaftStore)
 	SetNodeId(nodeId uint64)
+	GetNodeId() (nodeId uint64)
 	Stop()
 }
 
@@ -77,6 +78,10 @@ func (space *spaceManager) Stop() {
 
 func (space *spaceManager) SetNodeId(nodeId uint64) {
 	space.nodeId = nodeId
+}
+
+func (space *spaceManager) GetNodeId() (nodeId uint64){
+	return space.nodeId
 }
 
 func (space *spaceManager) SetRaftStore(raftStore raftstore.RaftStore) {
@@ -350,7 +355,7 @@ func (s *DataNode) fillHeartBeatResponse(response *proto.DataNodeHeartBeatRespon
 	response.PartitionInfo = make([]*proto.PartitionReport, 0)
 	space := s.space
 	space.RangePartitions(func(partition DataPartition) bool {
-		_, isLeader := partition.IsLeader()
+		leaderAddr, isLeader := partition.IsLeader()
 		vr := &proto.PartitionReport{
 			PartitionID:     uint64(partition.ID()),
 			PartitionStatus: partition.Status(),
@@ -358,7 +363,7 @@ func (s *DataNode) fillHeartBeatResponse(response *proto.DataNodeHeartBeatRespon
 			Used:            uint64(partition.Used()),
 			IsLeader:        isLeader,
 		}
-		log.LogDebugf("action[Heartbeat] dpid[%v], status[%v] total[%v] used[%v] leader[%v].", vr.PartitionID, vr.PartitionStatus, vr.Total, vr.Used, vr.IsLeader)
+		log.LogDebugf("action[Heartbeats] dpid[%v], status[%v] total[%v] used[%v] leader[%v] b[%v].", vr.PartitionID, vr.PartitionStatus, vr.Total, vr.Used, leaderAddr, vr.IsLeader)
 		response.PartitionInfo = append(response.PartitionInfo, vr)
 		return true
 	})
