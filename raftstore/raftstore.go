@@ -29,6 +29,7 @@ import (
 
 type RaftStore interface {
 	CreatePartition(cfg *PartitionConfig) (Partition, error)
+	ResetWalPath(walPath string)
 	Stop()
 	RaftConfig() *raft.Config
 	NodeManager
@@ -40,6 +41,10 @@ type raftStore struct {
 	raftConfig *raft.Config
 	raftServer *raft.RaftServer
 	walPath    string
+}
+
+func (s *raftStore) ResetWalPath(walPath string) {
+	s.walPath = walPath
 }
 
 func (s *raftStore) RaftConfig() *raft.Config {
