@@ -358,6 +358,7 @@ func (s *DataNode) fillHeartBeatResponse(response *proto.DataNodeHeartBeatRespon
 			Used:            uint64(partition.Used()),
 			IsLeader:        isLeader,
 		}
+		log.LogDebugf("action[Heartbeat] dpid[%v], status[%v] total[%v] used[%v] leader[%v].", vr.PartitionID, vr.PartitionStatus, vr.Total, vr.Used, vr.IsLeader)
 		response.PartitionInfo = append(response.PartitionInfo, vr)
 		return true
 	})
