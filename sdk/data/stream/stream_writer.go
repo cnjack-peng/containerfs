@@ -16,17 +16,18 @@ package stream
 
 import (
 	"fmt"
+	"net"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/juju/errors"
 	"github.com/tiglabs/containerfs/proto"
 	"github.com/tiglabs/containerfs/sdk/data/wrapper"
+	"github.com/tiglabs/containerfs/util"
 	"github.com/tiglabs/containerfs/util/log"
-	"net"
-	"strings"
-	"sync"
-	"sync/atomic"
 )
 
 const (
@@ -190,6 +191,12 @@ func (stream *StreamWriter) handleRequest(request interface{}) {
 
 func (stream *StreamWriter) write(data []byte, offset, size int) (total int, err error) {
 	log.LogDebugf("stream write: ino(%v) offset(%v) size(%v)", stream.Inode, offset, size)
+	err = stream.flushCurrExtentWriter(false)
+	if err != nil {
+		log.LogErrorf("stream write: err(%v)", err)
+		return
+	}
+
 	err = stream.extents.Refresh(stream.Inode, stream.client.getExtents)
 	if err != nil {
 		log.LogErrorf("stream write: err(%v)", err)
@@ -219,7 +226,56 @@ func (stream *StreamWriter) write(data []byte, offset, size int) (total int, err
 }
 
 func (stream *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error) {
-	//TODO
+	var dp *wrapper.DataPartition
+	offset := req.FileOffset
+	size := req.Size
+	ekOffset := int(req.ExtentKey.FileOffset)
+
+	if dp, err = gDataWrapper.GetDataPartition(req.ExtentKey.PartitionId); err != nil {
+		log.LogErrorf("doRewrite: failed to get datapartition, ek(%v), err(%v)", req.ExtentKey, err)
+		return
+	}
+
+	//TODO: try other hosts if not leader
+	conn, err := net.DialTimeout("tcp", dp.LeaderAddr, time.Second)
+	if err != nil {
+		log.LogErrorf("doRewrite: failed to dial to (%v) err(%v)", dp.LeaderAddr, err)
+		return
+	}
+	tcpConn := conn.(*net.TCPConn)
+	tcpConn.SetKeepAlive(true)
+	tcpConn.SetNoDelay(true)
+
+	for total < size {
+		reqPacket := NewWritePacket(dp, req.ExtentKey.ExtentId, offset-ekOffset+total, offset, true)
+		packSize := util.Min(size-total, util.BlockSize)
+		copy(reqPacket.Data[:packSize], req.Data[total:total+packSize])
+		reqPacket.Size = uint32(packSize)
+
+		//TODO: retry
+		err = reqPacket.writeTo(tcpConn)
+		if err != nil {
+			log.LogErrorf("doRewrite: failed to write to connect, err(%v)", err)
+			break
+		}
+
+		replyPacket := new(Packet)
+		err = replyPacket.ReadFromConn(tcpConn, proto.ReadDeadlineTime)
+		if err != nil {
+			log.LogErrorf("doRewrite: failed to read from connect, err(%v)", err)
+			break
+		}
+
+		if replyPacket.ResultCode != proto.OpOk || !reqPacket.IsEqualWriteReply(replyPacket) || reqPacket.Crc != replyPacket.Crc {
+			err = errors.New(fmt.Sprintf("reply NOK, req(%v) reply(%v)", reqPacket, replyPacket))
+			log.LogErrorf("doRewrite: err(%v)", err)
+			break
+		}
+
+		total += packSize
+	}
+
+	tcpConn.Close()
 	return
 }
 

@@ -130,7 +130,7 @@ func (writer *ExtentWriter) write(data []byte, kernelOffset, size int) (total in
 	}
 	for total < size {
 		if writer.currentPacket == nil {
-			writer.currentPacket = NewWritePacket(writer.dp, writer.extentId, writer.offset, kernelOffset)
+			writer.currentPacket = NewWritePacket(writer.dp, writer.extentId, writer.offset, kernelOffset, false)
 		}
 		canWrite = writer.currentPacket.fill(data[total:size], size-total) //fill this packet
 		if writer.IsFullCurrentPacket() || canWrite == 0 {
