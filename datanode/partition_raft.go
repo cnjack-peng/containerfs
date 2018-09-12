@@ -83,16 +83,16 @@ func (dp *dataPartition) StartRaft() (err error) {
 		}
 		peers = append(peers, rp)
 	}
-	log.LogDebugf("start partition id=%d raft peers: %s",
-		dp.partitionId, peers)
+	log.LogDebugf("start partition id=%d raft peers: %s path: %s",
+		dp.partitionId, peers, dp.path)
 	pc := &raftstore.PartitionConfig{
 		ID:      uint64(dp.partitionId),
 		Applied: dp.applyId,
 		Peers:   peers,
 		SM:      dp,
+		WalPath: dp.path,
 	}
 
-	dp.config.RaftStore.ResetWalPath(dp.path)
 	dp.raftPartition, err = dp.config.RaftStore.CreatePartition(pc)
 
 	return
