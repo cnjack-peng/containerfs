@@ -166,14 +166,15 @@ errDeal:
 
 func (m *Master) createDataPartition(w http.ResponseWriter, r *http.Request) {
 	var (
-		rstMsg                  string
-		volName                 string
-		partitionType           string
-		vol                     *Vol
-		reqCreateCount          int
-		capacity                int
-		lastTotalDataPartitions int
-		err                     error
+		rstMsg                     string
+		volName                    string
+		partitionType              string
+		vol                        *Vol
+		reqCreateCount             int
+		capacity                   int
+		lastTotalDataPartitions    int
+		clusterTotalDataPartitions int
+		err                        error
 	)
 
 	if reqCreateCount, volName, partitionType, err = parseCreateDataPartitionPara(r); err != nil {
@@ -185,8 +186,9 @@ func (m *Master) createDataPartition(w http.ResponseWriter, r *http.Request) {
 	}
 	capacity = m.cluster.getDataPartitionCapacity(vol)
 	lastTotalDataPartitions = len(vol.dataPartitions.dataPartitions)
+	clusterTotalDataPartitions = m.cluster.getDataPartitionCount()
 	for i := 0; i < reqCreateCount; i++ {
-		if (reqCreateCount + lastTotalDataPartitions) < len(vol.dataPartitions.dataPartitions) {
+		if (reqCreateCount+lastTotalDataPartitions) < len(vol.dataPartitions.dataPartitions) || clusterTotalDataPartitions > capacity {
 			break
 		}
 		if _, err = m.cluster.createDataPartition(volName, partitionType); err != nil {
