@@ -12,6 +12,8 @@ type DataPartition struct {
 	ReplicaNum    uint8
 	PartitionType string
 	Hosts         []string
+	RandomWrite   bool
+	LeaderAddr    string
 	Metrics       *DataPartitionMetrics
 }
 

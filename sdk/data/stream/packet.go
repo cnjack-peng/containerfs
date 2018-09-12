@@ -33,7 +33,7 @@ type Packet struct {
 	orgData      []byte
 }
 
-func NewWritePacket(dp *wrapper.DataPartition, extentId uint64, offset int, kernelOffset int) (p *Packet) {
+func NewWritePacket(dp *wrapper.DataPartition, extentId uint64, offset int, kernelOffset int, isRandom bool) (p *Packet) {
 	p = new(Packet)
 	p.PartitionID = dp.PartitionID
 	p.Magic = proto.ProtoMagic
@@ -45,7 +45,11 @@ func NewWritePacket(dp *wrapper.DataPartition, extentId uint64, offset int, kern
 	p.Arglen = uint32(len(p.Arg))
 	p.Nodes = uint8(len(dp.Hosts) - 1)
 	p.ReqID = proto.GetReqID()
-	p.Opcode = proto.OpWrite
+	if isRandom {
+		p.Opcode = proto.OpRandomWrite
+	} else {
+		p.Opcode = proto.OpWrite
+	}
 	p.kernelOffset = kernelOffset
 	p.Data, _ = proto.Buffers.Get(util.BlockSize)
 
