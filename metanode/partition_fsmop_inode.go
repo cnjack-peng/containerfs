@@ -217,6 +217,9 @@ func (mp *metaPartition) extentsTruncate(ino *Inode) (resp *ResponseInode) {
 		}
 		// check max
 		extItem := i.Extents.Max()
+		if extItem == nil {
+			return
+		}
 		ext := extItem.(*proto.ExtentKey)
 		if n := ino.Size - ext.FileOffset; ext.Size > uint32(n) {
 			ext.Size = uint32(n)
