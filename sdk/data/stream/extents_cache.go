@@ -63,7 +63,7 @@ func (cache *ExtentCache) update(gen, size uint64, eks []proto.ExtentKey) {
 
 	cache.gen = gen
 	cache.size = size
-	cache.root = btree.New(32)
+	cache.root.Clear(false)
 	for _, ek := range eks {
 		//log.LogDebugf("update: ek(%v)", ek)
 		extent := ek
@@ -155,10 +155,10 @@ func (cache *ExtentCache) PrepareRequest(offset, size int, data []byte) []*Exten
 	cache.RLock()
 	defer cache.RUnlock()
 
-	var lower *proto.ExtentKey
+	lower := &proto.ExtentKey{}
 	cache.root.DescendLessOrEqual(pivot, func(i btree.Item) bool {
 		ek := i.(*proto.ExtentKey)
-		lower = ek
+		lower.FileOffset = ek.FileOffset
 		return false
 	})
 
