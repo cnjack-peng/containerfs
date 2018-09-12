@@ -29,7 +29,6 @@ import (
 
 type RaftStore interface {
 	CreatePartition(cfg *PartitionConfig) (Partition, error)
-	ResetWalPath(walPath string)
 	Stop()
 	RaftConfig() *raft.Config
 	NodeManager
@@ -41,10 +40,6 @@ type raftStore struct {
 	raftConfig *raft.Config
 	raftServer *raft.RaftServer
 	walPath    string
-}
-
-func (s *raftStore) ResetWalPath(walPath string) {
-	s.walPath = walPath
 }
 
 func (s *raftStore) RaftConfig() *raft.Config {
@@ -136,7 +131,13 @@ func (s *raftStore) CreatePartition(cfg *PartitionConfig) (p Partition, err erro
 	// wc: WaL Configuration.
 	// wp: WaL Path.
 	// ws: WaL Storage.
-	walPath := path.Join(s.walPath, strconv.FormatUint(cfg.ID, 10))
+	var walPath string
+	if cfg.WalPath == "" {
+		walPath = path.Join(cfg.WalPath, strconv.FormatUint(cfg.ID, 10))
+	} else {
+		walPath = path.Join(s.walPath, strconv.FormatUint(cfg.ID, 10))
+	}
+
 	wc := &wal.Config{}
 	ws, err := wal.NewStorage(walPath, wc)
 	if err != nil {
