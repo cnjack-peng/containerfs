@@ -43,15 +43,15 @@ const (
 )
 
 const (
-	DefaultMaxMetaPartitionInodeID      uint64  = 1<<63 - 1
-	DefaultMetaPartitionInodeIDStep     uint64  = 1 << 24
-	DefaultMetaNodeReservedMem          uint64  = 1 << 32
-	RuntimeStackBufSize                         = 4096
-	NodesAliveRate                      float32 = 0.5
+	DefaultMaxMetaPartitionInodeID  uint64  = 1<<63 - 1
+	DefaultMetaPartitionInodeIDStep uint64  = 1 << 24
+	DefaultMetaNodeReservedMem      uint64  = 1 << 32
+	RuntimeStackBufSize                     = 4096
+	NodesAliveRate                  float32 = 0.5
 	//todo remove after docker test
-	MinReadWriteDataPartitions                  = 2
-	MinReadWriteDataPartitionsForClient         = 2
-	SpaceAvailRate                              = 0.95
+	MinReadWriteDataPartitions          = 2
+	MinReadWriteDataPartitionsForClient = 2
+	SpaceAvailRate                      = 0.95
 )
 
 const (

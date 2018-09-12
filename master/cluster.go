@@ -862,6 +862,15 @@ func (c *Cluster) getDataPartitionCapacity(vol *Vol) (count int) {
 	return
 }
 
+func (c *Cluster) getDataPartitionCount() (count int) {
+	c.volsLock.RLock()
+	defer c.volsLock.RUnlock()
+	for _, vol := range c.vols {
+		count = count + len(vol.dataPartitions.dataPartitions)
+	}
+	return
+}
+
 func (c *Cluster) syncCompactStatus(status bool) (err error) {
 	oldCompactStatus := c.compactStatus
 	c.compactStatus = status
