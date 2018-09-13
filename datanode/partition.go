@@ -40,6 +40,8 @@ const (
 	DataPartitionPrefix       = "datapartition"
 	DataPartitionMetaFileName = "META"
 	TempMetaFileName          = ".meta"
+	ApplyIndexFile            = "APPLY"
+	TempApplyIndexFile        = ".apply"
 	TimeLayout                = "2006-01-02 15:04:05"
 )
 
@@ -129,6 +131,7 @@ type dataPartition struct {
 	replicaHosts    []string
 	disk            *Disk
 	isLeader        bool
+	isRaftLeader    bool
 	path            string
 	used            int
 	extentStore     *storage.ExtentStore

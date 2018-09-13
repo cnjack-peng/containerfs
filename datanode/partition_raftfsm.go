@@ -43,7 +43,6 @@ func (dp *dataPartition) Apply(command []byte, index uint64) (resp interface{}, 
 		if opItem, err = rndWrtDataUnmarshal(msg.V); err != nil {
 			return
 		}
-
 		resp = dp.rndWrtStore(opItem)
 	default:
 		err = fmt.Errorf(fmt.Sprintf("Wrong random operate %v", msg.Op))
@@ -103,7 +102,7 @@ func (dp *dataPartition) ApplySnapshot(peers []raftproto.Peer, iterator raftprot
 		if err == io.EOF {
 			dp.applyId = appIndexID
 			err = nil
-			log.LogDebugf("[ApplySnapshot] successful.")
+			log.LogDebugf("[ApplySnapshot] successful applyId[%v].", dp.applyId)
 			return
 		}
 		log.LogErrorf("[ApplySnapshot]: %s", err.Error())
@@ -131,8 +130,10 @@ func (dp *dataPartition) HandleLeaderChange(leader uint64) {
 		"newLeader=%d", dp.config.PartitionId, leader))
 
 	if dp.config.NodeId == leader {
-		dp.isLeader = true
+		dp.isRaftLeader = true
 	}
+
+	//TODO: push leader to master? or check wal index for truncate?
 }
 
 func (dp *dataPartition) Put(key, val interface{}) (resp interface{}, err error) {

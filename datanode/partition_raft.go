@@ -25,6 +25,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"path"
+	"fmt"
+	"io/ioutil"
 )
 
 type dataPartitionCfg struct {
@@ -173,6 +176,51 @@ func (dp *dataPartition) confUpdateNode(req *proto.DataPartitionOfflineRequest, 
 	return
 }
 
+func (dp *dataPartition) storeApplyIndex(applyIndex uint64) (err error) {
+	filename := path.Join(dp.Path(), TempApplyIndexFile)
+	fp, err := os.OpenFile(filename, os.O_RDWR|os.O_APPEND|os.O_TRUNC|os.
+		O_CREATE, 0755)
+	if err != nil {
+		return
+	}
+	defer func() {
+		fp.Sync()
+		fp.Close()
+		os.Remove(filename)
+	}()
+	if _, err = fp.WriteString(fmt.Sprintf("%d", applyIndex)); err != nil {
+		return
+	}
+	err = os.Rename(filename, path.Join(dp.Path(), ApplyIndexFile))
+	return
+}
+
+func (dp *dataPartition) loadApplyIndex() (err error) {
+	filename := path.Join(dp.Path(), ApplyIndexFile)
+	if _, err = os.Stat(filename); err != nil {
+		err = nil
+		return
+	}
+	data, err := ioutil.ReadFile(filename)
+	if err != nil {
+		if err == os.ErrNotExist {
+			err = nil
+			return
+		}
+		err = errors.Errorf("[loadApplyIndex] OpenFile: %s", err.Error())
+		return
+	}
+	if len(data) == 0 {
+		err = errors.Errorf("[loadApplyIndex]: ApplyIndex is empty")
+		return
+	}
+	if _, err = fmt.Sscanf(string(data), "%d", &dp.applyId); err != nil {
+		err = errors.Errorf("[loadApplyID] ReadApplyID: %s", err.Error())
+		return
+	}
+	return
+}
+
 //random write need start raft server
 func (s *DataNode) parseRaftConfig(cfg *config.Config) (err error) {
 	s.raftDir = cfg.GetString(ConfigKeyRaftDir)
@@ -225,3 +273,4 @@ func (s *DataNode) stopRaftServer() {
 		s.raftStore.Stop()
 	}
 }
+
