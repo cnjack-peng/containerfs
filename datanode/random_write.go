@@ -120,11 +120,31 @@ func (dp *dataPartition) RndWrtSubmit(pkg *Packet) (err error) {
 func (dp *dataPartition) rndWrtStore(opItem *rndWrtOpItem) (status uint8) {
 	status = proto.OpOk
 	err := dp.GetExtentStore().Write(opItem.extentId, opItem.offset, opItem.size, opItem.data, opItem.crc)
+	dp.addDiskErrs(err, WriteFlag)
 	if err != nil {
 		log.LogError("[rndWrtStore] write err", err)
 		status = proto.OpExistErr
 	}
 	return
+}
+
+func (dp *dataPartition) addDiskErrs(err error, flag uint8) {
+	if err == nil {
+		return
+	}
+
+	d := dp.Disk()
+	if d == nil {
+		return
+	}
+	if !IsDiskErr(err.Error()) {
+		return
+	}
+	if flag == WriteFlag {
+		d.addWriteErr()
+	} else if flag == ReadFlag {
+		d.addReadErr()
+	}
 }
 
 type ItemIterator struct {

@@ -96,12 +96,18 @@ func (s *DataNode) handleRequest(msgH *MessageHandler) {
 
 func (s *DataNode) randomOpReq(pkg *Packet, msgH *MessageHandler) {
 	var err error
+	start := time.Now().UnixNano()
 	defer func() {
 		if err != nil {
 			err = errors.Annotatef(err, "Request[%v] Write Error", pkg.GetUniqueLogId())
 			pkg.PackErrorBody(LogWrite, err.Error())
+			logContent := fmt.Errorf("op[%v] error[%v]", pkg.GetOpMsg(), string(pkg.Data))
+			log.LogErrorf("action[randomOp] %v", logContent)
 		} else {
 			pkg.PackOkReply()
+			logContent := fmt.Sprintf("action[randomOp] op[%v] %v.",
+				pkg.ActionMsg(pkg.GetOpMsg(), msgH.inConn.RemoteAddr().String(), start, nil))
+			log.LogWrite(logContent)
 		}
 
 		msgH.replyCh <- pkg

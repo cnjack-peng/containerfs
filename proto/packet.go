@@ -173,6 +173,8 @@ func (p *Packet) GetOpMsg() (m string) {
 		m = "MarkDelete"
 	case OpWrite:
 		m = "Write"
+	case OpRandomWrite:
+		m = "RandomWrite"
 	case OpRead:
 		m = "Read"
 	case OpStreamRead:
