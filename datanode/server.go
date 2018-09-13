@@ -458,7 +458,7 @@ func (s *DataNode) addDiskErrs(partitionId uint32, err error, flag uint8) {
 	if d == nil {
 		return
 	}
-	if !s.isDiskErr(err.Error()) {
+	if !IsDiskErr(err.Error()) {
 		return
 	}
 	if flag == WriteFlag {
@@ -468,7 +468,7 @@ func (s *DataNode) addDiskErrs(partitionId uint32, err error, flag uint8) {
 	}
 }
 
-func (s *DataNode) isDiskErr(errMsg string) bool {
+func IsDiskErr(errMsg string) bool {
 	if strings.Contains(errMsg, storage.ErrorParamMismatch.Error()) || strings.Contains(errMsg, storage.ErrorFileNotFound.Error()) ||
 		strings.Contains(errMsg, storage.ErrorNoAvaliFile.Error()) || strings.Contains(errMsg, storage.ErrorObjNotFound.Error()) ||
 		strings.Contains(errMsg, io.EOF.Error()) || strings.Contains(errMsg, storage.ErrSyscallNoSpace.Error()) ||
