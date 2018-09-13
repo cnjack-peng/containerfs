@@ -135,7 +135,7 @@ func (s *raftStore) CreatePartition(cfg *PartitionConfig) (p Partition, err erro
 	if cfg.WalPath == "" {
 		walPath = path.Join(s.walPath, strconv.FormatUint(cfg.ID, 10))
 	} else {
-		walPath = path.Join(cfg.WalPath, strconv.FormatUint(cfg.ID, 10))
+		walPath = path.Join(cfg.WalPath, "wal_"+strconv.FormatUint(cfg.ID, 10))
 	}
 
 	wc := &wal.Config{}
