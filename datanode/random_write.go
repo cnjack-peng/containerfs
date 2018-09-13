@@ -122,7 +122,7 @@ func (dp *dataPartition) rndWrtStore(opItem *rndWrtOpItem) (status uint8) {
 	err := dp.GetExtentStore().Write(opItem.extentId, opItem.offset, opItem.size, opItem.data, opItem.crc)
 	dp.addDiskErrs(err, WriteFlag)
 	if err != nil {
-		log.LogError("[rndWrtStore] write err", err)
+		log.LogErrorf("[rndWrtStore] dp[%v] write err", dp.ID(), err)
 		status = proto.OpExistErr
 	}
 	return
