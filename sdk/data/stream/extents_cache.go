@@ -55,9 +55,10 @@ func (cache *ExtentCache) update(gen, size uint64, eks []proto.ExtentKey) {
 	cache.Lock()
 	defer cache.Unlock()
 
-	//log.LogDebugf("update: gen(%v) size(%v) eks(%v)", gen, size, eks)
+	log.LogDebugf("ExtentCache update: cache.gen(%v) cache.size(%v) gen(%v) size(%v)", cache.gen, cache.size, gen, size)
 
 	if cache.gen != 0 && cache.gen >= gen {
+		log.LogDebugf("ExtentCache update: no need to update, remote extents(%v)", eks)
 		return
 	}
 

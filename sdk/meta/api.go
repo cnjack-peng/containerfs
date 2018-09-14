@@ -277,7 +277,7 @@ func (mw *MetaWrapper) GetExtents(inode uint64) (gen uint64, size uint64, extent
 		log.LogErrorf("GetExtents: err(%v) status(%v)", err, status)
 		return 0, 0, nil, statusToErrno(status)
 	}
-	log.LogDebugf("GetExtents: ino(%v) gen(%v) size(%v) extents(%v)", inode, gen, size, extents)
+	log.LogDebugf("GetExtents: ino(%v) gen(%v) size(%v)", inode, gen, size)
 	return gen, size, extents, nil
 }
 

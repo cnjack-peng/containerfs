@@ -29,17 +29,18 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"strconv"
 	"strings"
 
-	"github.com/tiglabs/containerfs/fuse"
-	"github.com/tiglabs/containerfs/fuse/fs"
+	"github.com/juju/errors"
 
 	bdfs "github.com/tiglabs/containerfs/client/fs"
+	"github.com/tiglabs/containerfs/fuse"
+	"github.com/tiglabs/containerfs/fuse/fs"
 	"github.com/tiglabs/containerfs/util"
 	"github.com/tiglabs/containerfs/util/config"
 	"github.com/tiglabs/containerfs/util/log"
 	"github.com/tiglabs/containerfs/util/ump"
-	"strconv"
 )
 
 const (
@@ -118,6 +119,7 @@ func Mount(cfg *config.Config) error {
 
 	super, err := bdfs.NewSuper(volname, master, icacheTimeout)
 	if err != nil {
+		log.LogError(errors.ErrorStack(err))
 		return err
 	}
 

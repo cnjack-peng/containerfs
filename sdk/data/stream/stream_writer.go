@@ -389,6 +389,8 @@ func (stream *StreamWriter) updateToMetaNode() (err error) {
 		if lastUpdateSize == int(ek.Size) {
 			return nil
 		}
+		ekey := ek
+		stream.extents.Append(&ekey)
 		err = stream.client.appendExtentKey(stream.Inode, ek) //put it to metanode
 		if err == syscall.ENOENT {
 			stream.exit()

@@ -18,10 +18,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tiglabs/containerfs/fuse"
-	"github.com/tiglabs/containerfs/fuse/fs"
+	"github.com/juju/errors"
 	"golang.org/x/net/context"
 
+	"github.com/tiglabs/containerfs/fuse"
+	"github.com/tiglabs/containerfs/fuse/fs"
 	"github.com/tiglabs/containerfs/sdk/data/stream"
 	"github.com/tiglabs/containerfs/sdk/meta"
 	"github.com/tiglabs/containerfs/util/log"
@@ -46,14 +47,12 @@ func NewSuper(volname, master string, icacheTimeout int64) (s *Super, err error)
 	s = new(Super)
 	s.mw, err = meta.NewMetaWrapper(volname, master)
 	if err != nil {
-		log.LogErrorf("NewMetaWrapper failed! %v", err.Error())
-		return nil, err
+		return nil, errors.Annotate(err, "NewMetaWrapper failed!")
 	}
 
 	s.ec, err = stream.NewExtentClient(volname, master, s.mw.AppendExtentKey, s.mw.GetExtents)
 	if err != nil {
-		log.LogErrorf("NewExtentClient failed! %v", err.Error())
-		return nil, err
+		return nil, errors.Annotate(err, "NewExtentClient failed!")
 	}
 
 	s.volname = volname

@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/juju/errors"
+
 	"github.com/tiglabs/containerfs/proto"
 	"github.com/tiglabs/containerfs/util"
 	"github.com/tiglabs/containerfs/util/log"
@@ -69,9 +71,11 @@ func NewDataPartitionWrapper(volName, masterHosts string) (w *Wrapper, err error
 	w.rwPartition = make([]*DataPartition, 0)
 	w.partitions = make(map[uint32]*DataPartition)
 	if err = w.updateDataPartition(); err != nil {
+		err = errors.Annotate(err, "NewDataPartitionWrapper:")
 		return
 	}
 	if err = w.updateClusterInfo(); err != nil {
+		err = errors.Annotate(err, "NewDataPartitionWrapper:")
 		return
 	}
 	go w.update()
@@ -114,12 +118,12 @@ func (w *Wrapper) updateDataPartition() error {
 	paras["name"] = w.volName
 	msg, err := MasterHelper.Request(http.MethodGet, DataPartitionViewUrl, paras, nil)
 	if err != nil {
-		return err
+		return errors.Annotate(err, "updateDataPartition: request to master failed!")
 	}
 
 	view := &DataPartitionView{}
 	if err = json.Unmarshal(msg, view); err != nil {
-		return err
+		return errors.Annotatef(err, "updateDataPartition: unmarshal failed, msg(%v)", msg)
 	}
 
 	rwPartitionGroups := make([]*DataPartition, 0)
@@ -129,6 +133,7 @@ func (w *Wrapper) updateDataPartition() error {
 			rwPartitionGroups = append(rwPartitionGroups, dp)
 		}
 	}
+
 	for _, dp := range view.DataPartitions {
 		w.replaceOrInsertPartition(dp)
 	}

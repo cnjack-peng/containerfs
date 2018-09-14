@@ -51,7 +51,7 @@ func NewExtentClient(volname, master string, appendExtentKey AppendExtentKeyFunc
 	client = new(ExtentClient)
 	gDataWrapper, err = wrapper.NewDataPartitionWrapper(volname, master)
 	if err != nil {
-		return nil, fmt.Errorf("init dp Wrapper failed (%v)", err.Error())
+		return nil, errors.Annotatef(err, "Init dp wrapper failed!")
 	}
 	client.writers = make(map[uint64]*StreamWriter)
 	client.appendExtentKey = appendExtentKey
