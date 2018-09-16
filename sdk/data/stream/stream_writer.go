@@ -74,7 +74,7 @@ type StreamWriter struct {
 	extents *ExtentCache
 }
 
-func NewStreamWriter(client *ExtentClient, inode uint64) (stream *StreamWriter) {
+func NewStreamWriter(client *ExtentClient, inode uint64) (stream *StreamWriter, err error) {
 	stream = new(StreamWriter)
 	stream.client = client
 	stream.Inode = inode
@@ -83,6 +83,11 @@ func NewStreamWriter(client *ExtentClient, inode uint64) (stream *StreamWriter) 
 	stream.excludePartition = make([]uint32, 0)
 	stream.hasUpdateKey = make(map[string]int, 0)
 	stream.extents = NewExtentCache()
+	err = stream.extents.Refresh(inode, client.getExtents)
+	if err != nil {
+		log.LogErrorf("NewStreamWriter: err(%v)", err)
+		return nil, err
+	}
 	go stream.server()
 
 	return
@@ -181,11 +186,11 @@ func (stream *StreamWriter) write(data []byte, offset, size int) (total int, err
 		return
 	}
 
-	err = stream.extents.Refresh(stream.Inode, stream.client.getExtents)
-	if err != nil {
-		log.LogErrorf("stream write: err(%v)", err)
-		return
-	}
+	//	err = stream.extents.Refresh(stream.Inode, stream.client.getExtents)
+	//	if err != nil {
+	//		log.LogErrorf("stream write: err(%v)", err)
+	//		return
+	//	}
 
 	requests := stream.extents.PrepareRequest(offset, size, data)
 	log.LogDebugf("stream write: requests(%v)", requests)
@@ -302,6 +307,11 @@ func (stream *StreamWriter) doWrite(data []byte, offset, size int) (total int, e
 			write = size - total //recover success ,then write is allLength
 		}
 		total += write
+	}
+
+	if stream.currentWriter != nil {
+		ek := stream.currentWriter.toKey()
+		stream.extents.Append(&ek)
 	}
 
 	return total, err

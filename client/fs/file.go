@@ -109,7 +109,10 @@ func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 		return nil, ParseError(err)
 	}
 
-	f.super.ec.OpenForWrite(ino)
+	err = f.super.ec.OpenForWrite(ino)
+	if err != nil {
+		return nil, fuse.EIO
+	}
 
 	elapsed := time.Since(start)
 	log.LogDebugf("TRACE Open: ino(%v) flags(%v) (%v)ns", ino, req.Flags, elapsed.Nanoseconds())

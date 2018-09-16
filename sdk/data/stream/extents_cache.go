@@ -92,7 +92,6 @@ func (cache *ExtentCache) Append(ek *proto.ExtentKey) {
 	}
 
 	cache.root.ReplaceOrInsert(ek)
-	cache.gen++
 	if ekEnd > cache.size {
 		cache.size = ekEnd
 	}

@@ -118,7 +118,7 @@ func (client *ExtentClient) OpenForRead(inode uint64) (stream *StreamReader, err
 	return NewStreamReader(client, inode)
 }
 
-func (client *ExtentClient) OpenForWrite(inode uint64) {
+func (client *ExtentClient) OpenForWrite(inode uint64) (err error) {
 	client.referLock.Lock()
 	refercnt, ok := client.referCnt[inode]
 	if !ok {
@@ -137,14 +137,17 @@ func (client *ExtentClient) OpenForWrite(inode uint64) {
 		return
 	}
 
+	var writer *StreamWriter
 	client.writerLock.Lock()
 	_, ok = client.writers[inode]
 	if !ok {
-		writer := NewStreamWriter(client, inode)
-		client.writers[inode] = writer
+		writer, err = NewStreamWriter(client, inode)
+		if err == nil {
+			client.writers[inode] = writer
+		}
 	}
 	client.writerLock.Unlock()
-
+	return
 }
 
 func (client *ExtentClient) GetFileSize(inode uint64) uint64 {
