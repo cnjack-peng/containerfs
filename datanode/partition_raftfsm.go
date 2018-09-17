@@ -31,6 +31,13 @@ import (
 func (dp *dataPartition) Apply(command []byte, index uint64) (resp interface{}, err error) {
 	defer func() {
 		dp.uploadApplyID(index)
+		if err != nil {
+
+			resp = proto.OpExistErr
+			//TODO: hangup apply, repair data
+		} else {
+			resp = proto.OpOk
+		}
 	}()
 	msg := &RndWrtCmdItem{}
 	if err = msg.rndWrtCmdUnmarshal(command); err != nil {
@@ -43,7 +50,7 @@ func (dp *dataPartition) Apply(command []byte, index uint64) (resp interface{}, 
 		if opItem, err = rndWrtDataUnmarshal(msg.V); err != nil {
 			return
 		}
-		resp = dp.rndWrtStore(opItem)
+		err = dp.randomWriteStore(opItem)
 	default:
 		err = fmt.Errorf(fmt.Sprintf("Wrong random operate %v", msg.Op))
 		return

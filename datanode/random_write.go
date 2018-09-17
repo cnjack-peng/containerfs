@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/tiglabs/containerfs/proto"
 	"github.com/tiglabs/containerfs/util/log"
 )
 
@@ -117,13 +116,11 @@ func (dp *dataPartition) RndWrtSubmit(pkg *Packet) (err error) {
 	return
 }
 
-func (dp *dataPartition) rndWrtStore(opItem *rndWrtOpItem) (status uint8) {
-	status = proto.OpOk
-	err := dp.GetExtentStore().Write(opItem.extentId, opItem.offset, opItem.size, opItem.data, opItem.crc)
-	//dp.addDiskErrs(err, WriteFlag)
+func (dp *dataPartition) randomWriteStore(opItem *rndWrtOpItem) (err error) {
+	err = dp.GetExtentStore().Write(opItem.extentId, opItem.offset, opItem.size, opItem.data, opItem.crc)
+	dp.addDiskErrs(err, WriteFlag)
 	if err != nil {
-		log.LogErrorf("[rndWrtStore] dp[%v] write err[%v]", dp.ID(), err)
-		status = proto.OpExistErr
+		log.LogErrorf("[randomWriteStore] dp[%v] write err[%v]", dp.ID(), err)
 	}
 	return
 }
