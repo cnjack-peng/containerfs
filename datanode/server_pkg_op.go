@@ -365,8 +365,6 @@ func (s *DataNode) handleStreamRead(request *Packet, connect net.Conn) {
 		}
 	}
 
-	request.DataPartition.GetRaftPartition()
-
 	needReplySize := request.Size
 	offset := request.Offset
 	store := request.DataPartition.GetExtentStore()
