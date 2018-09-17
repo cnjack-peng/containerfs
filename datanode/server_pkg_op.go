@@ -325,45 +325,6 @@ func (s *DataNode) handleWrite(pkg *Packet) {
 	return
 }
 
-// Handle random opWrite packet.
-func (s *DataNode) handleRndOpWrite(pkg *Packet) {
-	var err error
-	defer func() {
-		if err != nil {
-			err = errors.Annotatef(err, "Request[%v] Write Error", pkg.GetUniqueLogId())
-			pkg.PackErrorBody(LogWrite, err.Error())
-		} else {
-			pkg.PackOkReply()
-		}
-	}()
-
-	leaderAddr, isLeader := pkg.DataPartition.IsLeader()
-	if leaderAddr == "" {
-		err = storage.ErrNoLeader
-		return
-	}
-	if !isLeader {
-		err = storage.ErrNotLeader
-		return
-	}
-	if pkg.DataPartition.Status() == proto.ReadOnly {
-		err = storage.ErrorPartitionReadOnly
-		return
-	}
-	if pkg.DataPartition.Available() <= 0 {
-		err = storage.ErrSyscallNoSpace
-		return
-	}
-
-	err = pkg.DataPartition.RndWrtSubmit(pkg)
-	s.addDiskErrs(pkg.PartitionID, err, WriteFlag)
-	if err == nil && pkg.Opcode == proto.OpWrite && pkg.Size == util.BlockSize {
-		proto.Buffers.Put(pkg.Data)
-	}
-
-	return
-}
-
 // Handle OpRead packet.
 func (s *DataNode) handleRead(pkg *Packet) {
 	pkg.Data = make([]byte, pkg.Size)
@@ -390,6 +351,22 @@ func (s *DataNode) handleStreamRead(request *Packet, connect net.Conn) {
 	var (
 		err error
 	)
+
+	if request.DataPartition.IsRandomWrite() {
+		_, ok := request.DataPartition.IsLeader()
+		if !ok {
+			err = storage.ErrNotLeader
+			request.PackErrorBody(ActionStreamRead, err.Error())
+			if err = request.WriteToConn(connect); err != nil {
+				err = fmt.Errorf(request.ActionMsg(ActionWriteToCli, connect.RemoteAddr().String(),	request.StartT, err))
+				log.LogErrorf(err.Error())
+			}
+			return
+		}
+	}
+
+	request.DataPartition.GetRaftPartition()
+
 	needReplySize := request.Size
 	offset := request.Offset
 	store := request.DataPartition.GetExtentStore()

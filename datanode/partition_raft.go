@@ -195,7 +195,7 @@ func (dp *dataPartition) storeApplyIndex(applyIndex uint64) (err error) {
 	return
 }
 
-func (dp *dataPartition) loadApplyIndex() (err error) {
+func (dp *dataPartition) LoadApplyIndex() (err error) {
 	filename := path.Join(dp.Path(), ApplyIndexFile)
 	if _, err = os.Stat(filename); err != nil {
 		err = nil

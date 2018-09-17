@@ -23,6 +23,7 @@ import (
 	"io"
 
 	"github.com/tiglabs/containerfs/util/log"
+	"github.com/tiglabs/containerfs/raftstore"
 )
 
 type RndWrtCmdItem struct {
@@ -101,7 +102,7 @@ func (rndWrtItem *RndWrtCmdItem) rndWrtCmdUnmarshal(cmd []byte) (err error) {
 	return json.Unmarshal(cmd, rndWrtItem)
 }
 
-func (dp *dataPartition) RndWrtSubmit(pkg *Packet) (err error) {
+func (dp *dataPartition) RandomWriteSubmit(pkg *Packet) (err error) {
 	val, err := rndWrtDataMarshal(pkg.FileID, pkg.Offset, int64(pkg.Size), pkg.Data, pkg.Crc)
 	if err != nil {
 		return
@@ -114,6 +115,14 @@ func (dp *dataPartition) RndWrtSubmit(pkg *Packet) (err error) {
 	pkg.ResultCode = resp.(uint8)
 	log.LogDebugf("[rndWrtSubmit] raft sync: response status = %v.", pkg.GetResultMesg())
 	return
+}
+
+func (dp *dataPartition) IsRandomWrite () (bool) {
+	return dp.config.RandomWrite
+}
+
+func (dp *dataPartition) GetRaftPartition () (raftPartition *raftstore.Partition) {
+	return 	&dp.raftPartition
 }
 
 func (dp *dataPartition) randomWriteStore(opItem *rndWrtOpItem) (err error) {

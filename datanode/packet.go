@@ -250,9 +250,9 @@ func (p *Packet) ClassifyErrorOp(errLog string, errMsg string) {
 	} else if strings.Contains(errMsg, storage.ErrSyscallNoSpace.Error()) {
 		p.ResultCode = proto.OpDiskNoSpaceErr
 	} else if strings.Contains(errMsg, storage.ErrorAgain.Error()) {
-		p.ResultCode = proto.OpIntraGroupNetErr
+		p.ResultCode = proto.OpAgain
 	} else if strings.Contains(errMsg, storage.ErrNotLeader.Error()) {
-		p.ResultCode = proto.OpErr
+		p.ResultCode = proto.OpNotLeaderErr
 	} else if strings.Contains(errMsg, storage.ErrorFileNotFound.Error()) {
 		if p.Opcode != proto.OpWrite {
 			p.ResultCode = proto.OpNotExistErr

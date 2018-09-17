@@ -109,6 +109,7 @@ const (
 	OpAgain            uint8 = 0xF9
 	OpExistErr         uint8 = 0xFA
 	OpInodeFullErr     uint8 = 0xFB
+	OpNotLeaderErr     uint8 = 0xFC
 	OpOk               uint8 = 0xF0
 
 	// For connection diagnosis
@@ -289,6 +290,8 @@ func (p *Packet) GetResultMesg() (m string) {
 		m = "ArgUnmatchErr"
 	case OpNotExistErr:
 		m = "NotExistErr"
+	case OpNotLeaderErr:
+		m = "NotLeaderErr"
 	default:
 		return fmt.Sprintf("Unknown ResultCode(%v)", p.ResultCode)
 	}

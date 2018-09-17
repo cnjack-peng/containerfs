@@ -81,7 +81,9 @@ type DataPartition interface {
 
 	FlushDelete() error
 	StartRaft() (err error)
-	RndWrtSubmit(pkg *Packet) (err error)
+	RandomWriteSubmit(pkg *Packet) (err error)
+	IsRandomWrite () (bool)
+	LoadApplyIndex() (err error)
 
 	AddWriteMetrics(latency uint64)
 	AddReadMetrics(latency uint64)
@@ -194,6 +196,10 @@ func LoadDataPartition(partitionDir string, disk *Disk) (dp DataPartition, err e
 	}
 
 	if dpCfg.RandomWrite {
+		if err = dp.LoadApplyIndex(); err != nil {
+			log.LogErrorf("action[loadApplyIndex] %v",err)
+		}
+
 		if err = dp.StartRaft(); err != nil {
 			return
 		}

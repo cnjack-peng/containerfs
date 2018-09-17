@@ -122,6 +122,10 @@ func (p *partition) AppliedIndex() (applied uint64) {
 	return
 }
 
+func (p *partition) CommittedIndex() (committed uint64) {
+
+}
+
 func (p *partition) Submit(cmd []byte) (resp interface{}, err error) {
 	if !p.IsLeader() {
 		err = ErrNotLeader
