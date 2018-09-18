@@ -141,6 +141,7 @@ type dataPartition struct {
 	raftPartition   raftstore.Partition
 	config          *dataPartitionCfg
 	applyId         uint64
+	applyErrMinId   uint64
 	stopC           chan bool
 
 	runtimeMetrics *DataPartitionMetrics

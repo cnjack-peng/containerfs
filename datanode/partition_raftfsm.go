@@ -32,9 +32,11 @@ func (dp *dataPartition) Apply(command []byte, index uint64) (resp interface{}, 
 	defer func() {
 		dp.uploadApplyID(index)
 		if err != nil {
-
 			resp = proto.OpExistErr
-			//TODO: hangup apply, repair data
+			dp.ChangeStatus(proto.Unavaliable)
+			if dp.applyErrMinId == 0 {
+				dp.applyErrMinId = index  //record min apply id
+			}
 		} else {
 			resp = proto.OpOk
 		}
