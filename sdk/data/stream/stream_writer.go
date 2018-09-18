@@ -180,17 +180,6 @@ func (stream *StreamWriter) handleRequest(request interface{}) {
 
 func (stream *StreamWriter) write(data []byte, offset, size int) (total int, err error) {
 	log.LogDebugf("stream write: ino(%v) offset(%v) size(%v)", stream.Inode, offset, size)
-	//	err = stream.flushCurrExtentWriter(false)
-	//	if err != nil {
-	//		log.LogErrorf("stream write: err(%v)", err)
-	//		return
-	//	}
-
-	//	err = stream.extents.Refresh(stream.Inode, stream.client.getExtents)
-	//	if err != nil {
-	//		log.LogErrorf("stream write: err(%v)", err)
-	//		return
-	//	}
 
 	requests := stream.extents.PrepareRequest(offset, size, data)
 	log.LogDebugf("stream write: requests(%v)", requests)
@@ -225,15 +214,11 @@ func (stream *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error)
 		return
 	}
 
-	//TODO: try other hosts if not leader
-	conn, err := net.DialTimeout("tcp", dp.LeaderAddr, time.Second)
+	sc := NewStreamConn(dp)
+	err = sc.GetConn(dp.LeaderAddr)
 	if err != nil {
-		log.LogErrorf("doRewrite: failed to dial to (%v) err(%v)", dp.LeaderAddr, err)
-		return
+		log.LogWarnf("doRewrite: failed to get connection to (%v)", dp.LeaderAddr)
 	}
-	tcpConn := conn.(*net.TCPConn)
-	tcpConn.SetKeepAlive(true)
-	tcpConn.SetNoDelay(true)
 
 	for total < size {
 		reqPacket := NewWritePacket(dp, req.ExtentKey.ExtentId, offset-ekOffset+total, offset, true)
@@ -241,17 +226,9 @@ func (stream *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error)
 		copy(reqPacket.Data[:packSize], req.Data[total:total+packSize])
 		reqPacket.Size = uint32(packSize)
 
-		//TODO: retry
-		err = reqPacket.writeTo(tcpConn)
+		replyPacket, err := sc.Send(reqPacket)
 		if err != nil {
-			log.LogErrorf("doRewrite: failed to write to connect, err(%v)", err)
-			break
-		}
-
-		replyPacket := new(Packet)
-		err = replyPacket.ReadFromConn(tcpConn, proto.ReadDeadlineTime)
-		if err != nil {
-			log.LogErrorf("doRewrite: failed to read from connect, err(%v)", err)
+			log.LogErrorf("doRewrite failed: err(%v)", err)
 			break
 		}
 
@@ -264,7 +241,7 @@ func (stream *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error)
 		total += packSize
 	}
 
-	tcpConn.Close()
+	sc.PutConn()
 	return
 }
 
