@@ -132,8 +132,6 @@ func (s *DataNode) randomOpReq(pkg *Packet, msgH *MessageHandler) {
 	}
 
 	err = pkg.DataPartition.RandomWriteSubmit(pkg)
-	//TODO not add disk at here
-	s.addDiskErrs(pkg.PartitionID, err, WriteFlag)
 	if err == nil && pkg.Opcode == proto.OpRandomWrite && pkg.Size == util.BlockSize {
 		proto.Buffers.Put(pkg.Data)
 	}

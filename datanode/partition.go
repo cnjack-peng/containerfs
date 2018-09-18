@@ -142,6 +142,7 @@ type dataPartition struct {
 	config          *dataPartitionCfg
 	applyId         uint64
 	applyErrMinId   uint64
+	storeC          chan uint64
 	stopC           chan bool
 
 	runtimeMetrics *DataPartitionMetrics

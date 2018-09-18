@@ -108,6 +108,52 @@ func (dp *dataPartition) stopRaft() {
 	return
 }
 
+func (dp *dataPartition) startSchedule()  {
+	var isRunning bool = false
+	timer := time.NewTimer(time.Hour)
+	timer.Stop()
+
+	dumpFunc := func(applyIndex uint64) {
+		log.LogDebugf("[startSchedule] partitionId=%d: applyID=%d",	dp.config.PartitionId, applyIndex)
+		if err := dp.storeApplyIndex(applyIndex); err != nil {
+			//retry
+			dp.storeC <- applyIndex
+			err = errors.Errorf("[startSchedule]: dump partition id=%d: %v", dp.config.PartitionId, err.Error())
+			log.LogErrorf(err.Error())
+		}
+		isRunning = false
+	}
+
+	go func(stopC chan bool) {
+		var indexes []uint64
+		readyChan := make(chan struct{}, 1)
+		for {
+			if len(indexes) > 0 {
+				if isRunning == false {
+					isRunning = true
+					readyChan <- struct{}{}
+				}
+			}
+			select {
+			case <-stopC:
+				timer.Stop()
+				return
+
+			case <-readyChan:
+				for _, idx := range indexes {
+					go dumpFunc(idx)
+				}
+				indexes = nil
+			case applyIndex := <-dp.storeC:
+				indexes = append(indexes, applyIndex)
+			case <-timer.C:
+				// Truncate raft log
+				//dp.raftPartition.Truncate(dp.applyId)
+			}
+		}
+	}(dp.stopC)
+}
+
 func (dp *dataPartition) confAddNode(req *proto.DataPartitionOfflineRequest, index uint64) (updated bool, err error) {
 	var (
 		heartbeatPort int
