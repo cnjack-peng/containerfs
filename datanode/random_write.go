@@ -17,13 +17,15 @@ package datanode
 import (
 	_ "net/http/pprof"
 
+	"io"
+	"net"
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
-	"io"
 
 	"github.com/tiglabs/containerfs/util/log"
 	"github.com/tiglabs/containerfs/raftstore"
+	"github.com/tiglabs/containerfs/storage"
 )
 
 type RndWrtCmdItem struct {
@@ -117,12 +119,8 @@ func (dp *dataPartition) RandomWriteSubmit(pkg *Packet) (err error) {
 	return
 }
 
-func (dp *dataPartition) IsRandomWrite () (bool) {
-	return dp.config.RandomWrite
-}
-
-func (dp *dataPartition) GetRaftPartition () (raftPartition *raftstore.Partition) {
-	return 	&dp.raftPartition
+func (dp *dataPartition) GetRaftPartition() (raftPartition *raftstore.Partition) {
+	return &dp.raftPartition
 }
 
 func (dp *dataPartition) randomWriteStore(opItem *rndWrtOpItem) (err error) {
@@ -151,6 +149,23 @@ func (dp *dataPartition) addDiskErrs(err error, flag uint8) {
 	} else if flag == ReadFlag {
 		d.addReadErr()
 	}
+}
+
+func (dp *dataPartition) RandomPartitionReadCheck(request *Packet, connect net.Conn) (err error) {
+	if !dp.config.RandomWrite {
+		return
+	}
+	_, ok := dp.IsLeader()
+	if !ok {
+		err = storage.ErrNotLeader
+		return
+	}
+
+	if dp.applyId+1 < dp.raftPartition.CommittedIndex() {
+		err = storage.ErrorAgain
+		return
+	}
+	return
 }
 
 type ItemIterator struct {

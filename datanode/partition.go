@@ -26,6 +26,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"net"
+	"sort"
 
 	"github.com/juju/errors"
 	"github.com/tiglabs/containerfs/master"
@@ -33,7 +35,6 @@ import (
 	"github.com/tiglabs/containerfs/raftstore"
 	"github.com/tiglabs/containerfs/storage"
 	"github.com/tiglabs/containerfs/util/log"
-	"sort"
 )
 
 const (
@@ -82,7 +83,7 @@ type DataPartition interface {
 	FlushDelete() error
 	StartRaft() (err error)
 	RandomWriteSubmit(pkg *Packet) (err error)
-	IsRandomWrite () (bool)
+	RandomPartitionReadCheck(request *Packet, connect net.Conn) (err error)
 	LoadApplyIndex() (err error)
 
 	AddWriteMetrics(latency uint64)

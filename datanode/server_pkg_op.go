@@ -352,17 +352,13 @@ func (s *DataNode) handleStreamRead(request *Packet, connect net.Conn) {
 		err error
 	)
 
-	if request.DataPartition.IsRandomWrite() {
-		_, ok := request.DataPartition.IsLeader()
-		if !ok {
-			err = storage.ErrNotLeader
-			request.PackErrorBody(ActionStreamRead, err.Error())
-			if err = request.WriteToConn(connect); err != nil {
-				err = fmt.Errorf(request.ActionMsg(ActionWriteToCli, connect.RemoteAddr().String(),	request.StartT, err))
-				log.LogErrorf(err.Error())
-			}
-			return
+	if err = request.DataPartition.RandomPartitionReadCheck(request, connect); err != nil {
+		request.PackErrorBody(ActionStreamRead, err.Error())
+		if err = request.WriteToConn(connect); err != nil {
+			err = fmt.Errorf(request.ActionMsg(ActionWriteToCli, connect.RemoteAddr().String(),	request.StartT, err))
+			log.LogErrorf(err.Error())
 		}
+		return
 	}
 
 	needReplySize := request.Size
