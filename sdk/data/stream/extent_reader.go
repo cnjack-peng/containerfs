@@ -20,14 +20,10 @@ import (
 	"github.com/tiglabs/containerfs/proto"
 	"github.com/tiglabs/containerfs/sdk/data/wrapper"
 	"github.com/tiglabs/containerfs/util"
-	//"github.com/tiglabs/containerfs/util/log"
 	"github.com/tiglabs/containerfs/util/pool"
 	"hash/crc32"
-	//"math/rand"
 	"net"
 	"strings"
-	"sync/atomic"
-	//"time"
 )
 
 const (
@@ -74,10 +70,9 @@ var (
 //}
 
 type ExtentReader struct {
-	inode       uint64
-	key         proto.ExtentKey
-	dp          *wrapper.DataPartition
-	readerIndex uint32
+	inode uint64
+	key   proto.ExtentKey
+	dp    *wrapper.DataPartition
 }
 
 func (reader *ExtentReader) Read(req *ExtentRequest) (readBytes int, err error) {
@@ -126,15 +121,9 @@ func (reader *ExtentReader) streamReadDataFromHost(offset, expectReadSize int, d
 	kernelsize int) (actualReadSize int, host string, err error) {
 	request := NewStreamReadPacket(&reader.key, offset, expectReadSize)
 	var connect *net.TCPConn
-	index := atomic.LoadUint32(&reader.readerIndex)
-	if index >= uint32(reader.dp.ReplicaNum) {
-		index = 0
-		atomic.StoreUint32(&reader.readerIndex, 0)
-	}
-	host = reader.dp.Hosts[index]
+	host = reader.dp.LeaderAddr
 	connect, err = ReadConnectPool.Get(host)
 	if err != nil {
-		atomic.AddUint32(&reader.readerIndex, 1)
 		return 0, host, errors.Annotatef(err, reader.toString()+
 			"streamReadDataFromHost dp(%v) cannot get  connect from host(%v) request(%v) ",
 			reader.key.PartitionId, host, request.GetUniqueLogId())
@@ -146,7 +135,6 @@ func (reader *ExtentReader) streamReadDataFromHost(offset, expectReadSize int, d
 			if reader.isUseCloseConnectErr(err) {
 				return
 			}
-			atomic.AddUint32(&reader.readerIndex, 1)
 		} else {
 			ReadConnectPool.Put(connect, NoCloseConnect)
 		}

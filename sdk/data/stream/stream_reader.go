@@ -19,7 +19,6 @@ import (
 	"github.com/tiglabs/containerfs/proto"
 	"github.com/tiglabs/containerfs/util/log"
 	"io"
-	"math/rand"
 	"sync"
 )
 
@@ -77,7 +76,6 @@ func (stream *StreamReader) GetExtentReader(ek *proto.ExtentKey) (*ExtentReader,
 	reader.inode = stream.inode
 	reader.key = *ek
 	reader.dp = partition
-	reader.readerIndex = uint32(rand.Intn(int(reader.dp.ReplicaNum)))
 	return reader, nil
 }
 
