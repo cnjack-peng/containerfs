@@ -288,6 +288,7 @@ func (stream *StreamWriter) doWrite(data []byte, offset, size int) (total int, e
 
 	if stream.currentWriter != nil {
 		ek := stream.currentWriter.toKey()
+		ek.Size += uint32(total)
 		stream.extents.Append(&ek)
 	}
 
