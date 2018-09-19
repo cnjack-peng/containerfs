@@ -22,6 +22,7 @@ import (
 	"github.com/tiglabs/containerfs/util/config"
 	"io/ioutil"
 	"os"
+	"bytes"
 )
 
 type OpKvData struct {
@@ -30,6 +31,45 @@ type OpKvData struct {
 	V  []byte `json:"v"`
 }
 
+type rndWrtItem struct {
+	extentId uint64
+	offset   int64
+	size     int64
+	data     []byte
+	crc      uint32
+}
+
+const (
+	opRandomWrite   uint32 = iota
+)
+
+
+func randomWriteUnmarshal(raw []byte) (result *rndWrtItem, err error) {
+	var opItem rndWrtItem
+
+	buff := bytes.NewBuffer(raw)
+	if err = binary.Read(buff, binary.BigEndian, &opItem.extentId); err != nil {
+		return
+	}
+	if err = binary.Read(buff, binary.BigEndian, &opItem.offset); err != nil {
+		return
+	}
+	if err = binary.Read(buff, binary.BigEndian, &opItem.size); err != nil {
+		return
+	}
+	if err = binary.Read(buff, binary.BigEndian, &opItem.crc); err != nil {
+		return
+	}
+	opItem.data = make([]byte, opItem.size)
+	if _, err = buff.Read(opItem.data); err != nil {
+		return
+	}
+
+	result = &opItem
+	return
+}
+
+
 func main() {
 	fmt.Println("Read raft wal record")
 	var (
@@ -37,6 +77,7 @@ func main() {
 		fileOffset uint64
 		dataSize   uint64
 		dataString string
+	    randWrite *rndWrtItem
 	)
 
 	flag.Parse()
@@ -83,7 +124,20 @@ func main() {
 					fmt.Println("unmarshal fail", cmd, err)
 					return
 				}
-				dataString = fmt.Sprintf("opt:%v, k:%v, v:%v", cmd.Op, cmd.K, cmd.V)
+
+				if cmd.Op == opRandomWrite {
+					randWrite, err = randomWriteUnmarshal(cmd.V)
+					if err == nil {
+						dataString = fmt.Sprintf("opt:%v, k:%v, extent:%v, off:%v, size:%v",
+							cmd.Op, cmd.K, randWrite.extentId, randWrite.offset, randWrite.size)
+					} else {
+						dataString = fmt.Sprintf("rand write umarshal err: %v", err)
+					}
+
+				} else {
+					dataString = fmt.Sprintf("opt:%v, k:%v, v:%v", cmd.Op, cmd.K, cmd.V)
+				}
+
 			} else if opType == 1 {
 				cType := dataTemp[26]
 				pType := dataTemp[27]
