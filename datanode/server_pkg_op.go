@@ -128,6 +128,7 @@ func (s *DataNode) handleCreateFile(pkg *Packet) {
 			ino = binary.BigEndian.Uint64(pkg.Data)
 		}
 		err = pkg.DataPartition.GetExtentStore().Create(pkg.FileID, ino, false)
+		log.LogDebugf("[CreateFile]create extent(%v_%v) for ino(%v)", pkg.DataPartition.ID(), pkg.FileID, ino)
 	}
 	return
 }
