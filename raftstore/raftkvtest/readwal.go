@@ -146,6 +146,8 @@ func main() {
 				dataString = fmt.Sprintf("cngType:%v, peerType:%v, priority:%v, id:%v", cType, pType, prt, pid)
 			}
 
+		} else {
+			dataString = fmt.Sprintf("dataSize:%v <= 17", dataSize)
 		}
 		crcOffset := 9 + dataSize
 		crc := binary.BigEndian.Uint32(dataTemp[crcOffset : crcOffset+4])
