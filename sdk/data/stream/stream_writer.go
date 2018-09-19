@@ -216,7 +216,6 @@ func (stream *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error)
 	}
 
 	sc := NewStreamConn(dp)
-	err = sc.GetConn(dp.LeaderAddr)
 	if err != nil {
 		log.LogWarnf("doRewrite: failed to get connection to (%v)", dp.LeaderAddr)
 	}
@@ -242,7 +241,6 @@ func (stream *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error)
 		total += packSize
 	}
 
-	sc.PutConn()
 	return
 }
 

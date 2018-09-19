@@ -121,6 +121,8 @@ func (w *Wrapper) updateDataPartition() error {
 		return errors.Annotate(err, "updateDataPartition: request to master failed!")
 	}
 
+	log.LogInfof("updateDataPartition: msg(%v)", string(msg))
+
 	view := &DataPartitionView{}
 	if err = json.Unmarshal(msg, view); err != nil {
 		return errors.Annotatef(err, "updateDataPartition: unmarshal failed, msg(%v)", msg)
