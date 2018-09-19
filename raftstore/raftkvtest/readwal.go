@@ -121,7 +121,7 @@ func main() {
 			if opType == 0 {
 				cmd := new(OpKvData)
 				if err = json.Unmarshal(dataTemp[26:26+dataSize-17], cmd); err != nil {
-					fmt.Println("unmarshal fail", cmd, err)
+					fmt.Println("unmarshal fail", fileOffset, len(data), dataSize, err)
 					return
 				}
 
@@ -151,7 +151,8 @@ func main() {
 		}
 		crcOffset := 9 + dataSize
 		crc := binary.BigEndian.Uint32(dataTemp[crcOffset : crcOffset+4])
-		fmt.Println(fmt.Sprintf("recType[%v] dataSize[%v] opType[%v] term[%v] index[%v] data[%v] crc[%x]", recordType, dataSize, opType, term, index, dataString, crc))
+		fmt.Println(fmt.Sprintf("recType[%v] dataSize[%v] opType[%v] term[%v] index[%v] data[%v] crc[%x]",
+			recordType, dataSize, opType, term, index, dataString, crc))
 		recordSize := 1 + 8 + dataSize + 4
 		fileOffset = fileOffset + recordSize
 	}

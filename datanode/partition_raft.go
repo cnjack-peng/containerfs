@@ -224,8 +224,7 @@ func (dp *dataPartition) confUpdateNode(req *proto.DataPartitionOfflineRequest, 
 
 func (dp *dataPartition) storeApplyIndex(applyIndex uint64) (err error) {
 	filename := path.Join(dp.Path(), TempApplyIndexFile)
-	fp, err := os.OpenFile(filename, os.O_RDWR|os.O_APPEND|os.O_TRUNC|os.
-		O_CREATE, 0755)
+	fp, err := os.OpenFile(filename, os.O_RDWR|os.O_APPEND|os.O_TRUNC|os.O_CREATE, 0755)
 	if err != nil {
 		return
 	}

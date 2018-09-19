@@ -105,7 +105,7 @@ func (s *DataNode) randomOpReq(pkg *Packet, msgH *MessageHandler) {
 			log.LogErrorf("action[randomOp] %v", logContent)
 		} else {
 			pkg.PackOkReply()
-			logContent := fmt.Sprintf("action[randomOp] op[%v] %v.",
+			logContent := fmt.Sprintf("action[randomOp] op[%v].",
 				pkg.ActionMsg(pkg.GetOpMsg(), msgH.inConn.RemoteAddr().String(), start, nil))
 			log.LogWrite(logContent)
 		}
