@@ -160,9 +160,8 @@ func (writer *ExtentWriter) sendCurrPacket() (err error) {
 	packet := writer.currentPacket
 	writer.currentPacket = nil
 	orgOffset := writer.offset
-	writer.offset += packet.getPacketLength()
 	err = packet.writeTo(writer.connect) //if send packet,then signal recive goroutine for recive from connect
-	prefix := fmt.Sprintf("send inode %v_%v", writer.inode, packet.kernelOffset)
+	prefix := fmt.Sprintf("op(%v) send inode %v_%v", packet.GetOpMsg(), writer.inode, packet.kernelOffset)
 	log.LogDebugf(prefix+" to extent(%v) pkg(%v) orgextentOffset(%v)"+
 		" packetGetPacketLength(%v) after jia(%v) crc(%v)",
 		writer, packet.GetUniqueLogId(), orgOffset, packet.getPacketLength(),

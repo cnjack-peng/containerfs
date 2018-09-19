@@ -118,6 +118,7 @@ func (stream *StreamWriter) needFlush(fileOffset uint64) bool {
 //stream init,alloc a extent ,select dp and extent
 func (stream *StreamWriter) init(fileOffset uint64) (err error) {
 	if stream.needFlush(fileOffset) {
+		//log.LogDebugf("init needFlush: fileOffset(%v) currentWriter.fileOffset(%v) currentWriter.offset(%v)", fileOffset, stream.currentWriter.fileOffset, stream.currentWriter.offset)
 		if err = stream.flushCurrExtentWriter(true); err != nil {
 			return errors.Annotatef(err, "WriteInit")
 		}
@@ -182,7 +183,7 @@ func (stream *StreamWriter) write(data []byte, offset, size int) (total int, err
 	log.LogDebugf("stream write: ino(%v) offset(%v) size(%v)", stream.Inode, offset, size)
 
 	requests := stream.extents.PrepareRequest(offset, size, data)
-	log.LogDebugf("stream write: requests(%v)", requests)
+	log.LogDebugf("stream write: prepared requests(%v)", requests)
 	for _, req := range requests {
 		var writeSize int
 		if req.ExtentKey != nil {
@@ -199,7 +200,7 @@ func (stream *StreamWriter) write(data []byte, offset, size int) (total int, err
 	if offset+total > int(stream.extents.Size()) {
 		stream.extents.SetSize(uint64(offset + total))
 	}
-	log.LogDebugf("stream write: total(%v) err(%v)", total, err)
+	log.LogDebugf("stream write: done total(%v) err(%v)", total, err)
 	return
 }
 
@@ -273,6 +274,7 @@ func (stream *StreamWriter) doWrite(data []byte, offset, size int) (total int, e
 		if err == nil {
 			write = size - total
 			total += write
+			stream.currentWriter.offset += write
 			continue
 		}
 		if strings.Contains(err.Error(), FullExtentErr.Error()) {
@@ -284,6 +286,7 @@ func (stream *StreamWriter) doWrite(data []byte, offset, size int) (total int, e
 			write = size - total //recover success ,then write is allLength
 		}
 		total += write
+		stream.currentWriter.offset += write
 	}
 
 	if stream.currentWriter != nil {
