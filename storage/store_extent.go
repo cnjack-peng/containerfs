@@ -270,7 +270,7 @@ func (s *ExtentStore) Write(extentId uint64, offset, size int64, data []byte, cr
 	extentInfo, has = s.extentInfoMap[extentId]
 	s.extentInfoMux.RUnlock()
 	if !has {
-		err = fmt.Errorf("extent %v not exist", extentId)
+		err = fmt.Errorf("%s extent=%v", ErrorExtentNotFound, extentId)
 		return
 	}
 	extent, err := s.getExtent(extentId)

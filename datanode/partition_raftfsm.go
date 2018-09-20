@@ -29,14 +29,15 @@ import (
 )
 
 func (dp *dataPartition) Apply(command []byte, index uint64) (resp interface{}, err error) {
+	opItem := &rndWrtOpItem{}
 	defer func() {
 		dp.uploadApplyID(index)
 		if err != nil {
 			resp = proto.OpExistErr
-			dp.ChangeStatus(proto.Unavaliable)
-			if dp.applyErrMinId == 0 {
-				dp.applyErrMinId = index  //record min apply id
-			}
+//			dp.raftC <- opStopRaft
+
+			//TODO: start extent repair
+//			dp.repairC <- opItem
 		} else {
 			resp = proto.OpOk
 		}
@@ -46,13 +47,20 @@ func (dp *dataPartition) Apply(command []byte, index uint64) (resp interface{}, 
 		return
 	}
 
-	opItem := &rndWrtOpItem{}
 	switch msg.Op {
 	case opRandomWrite:
 		if opItem, err = rndWrtDataUnmarshal(msg.V); err != nil {
 			return
 		}
-		err = dp.randomWriteStore(opItem)
+		for i := 0; i < maxApplyErrRetry; i++ {
+			err = dp.GetExtentStore().Write(opItem.extentId, opItem.offset, opItem.size, opItem.data, opItem.crc)
+			dp.addDiskErrs(err, WriteFlag)
+			if err == nil {
+				break
+			}
+			log.LogErrorf("[randomWriteStore] dp[%v] write err[%v] retry[%v]", dp.ID(), err, i)
+		}
+
 	default:
 		err = fmt.Errorf(fmt.Sprintf("Wrong random operate %v", msg.Op))
 		return
@@ -141,11 +149,13 @@ func (dp *dataPartition) HandleLeaderChange(leader uint64) {
 	if dp.config.NodeId == leader {
 		dp.isRaftLeader = true
 	}
-
-	//TODO: push leader to master? or check wal index for truncate?
 }
 
 func (dp *dataPartition) Put(key, val interface{}) (resp interface{}, err error) {
+	if dp.raftPartition == nil {
+		err = fmt.Errorf("%s key=%v", RaftIsNotStart, key)
+		return
+	}
 	item := &RndWrtCmdItem{
 		Op: key.(uint32),
 		K:  nil,

@@ -142,7 +142,8 @@ type dataPartition struct {
 	raftPartition   raftstore.Partition
 	config          *dataPartitionCfg
 	applyId         uint64
-	applyErrMinId   uint64
+	raftC           chan uint32
+	repairC         chan *rndWrtOpItem
 	storeC          chan uint64
 	stopC           chan bool
 
@@ -248,6 +249,9 @@ func (dp *dataPartition) Path() string {
 }
 
 func (dp *dataPartition) IsLeader() (leaderAddr string, ok bool) {
+	if dp.raftPartition == nil {
+		return
+	}
 	leaderID, _ := dp.raftPartition.LeaderTerm()
 	if leaderID == 0 {
 		return

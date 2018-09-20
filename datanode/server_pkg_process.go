@@ -113,11 +113,7 @@ func (s *DataNode) randomOpReq(pkg *Packet, msgH *MessageHandler) {
 		msgH.replyCh <- pkg
 	}()
 
-	leaderAddr, isLeader := pkg.DataPartition.IsLeader()
-	if leaderAddr == "" {
-		err = storage.ErrNoLeader
-		return
-	}
+	_, isLeader := pkg.DataPartition.IsLeader()
 	if !isLeader {
 		err = storage.ErrNotLeader
 		return

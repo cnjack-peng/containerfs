@@ -38,6 +38,7 @@ var (
 	ErrPkgCrcMismatch      = errors.New("pkg crc is not equal pkg data")
 	ErrNotLeader           = errors.New("not raft leader")
 	ErrNoLeader            = errors.New("raft no leader")
+	ErrorExtentNotFound    = errors.New("extent not exist")
 )
 
 func NewParamMismatchErr(msg string) (err error) {

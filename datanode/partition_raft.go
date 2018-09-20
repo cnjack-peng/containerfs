@@ -104,17 +104,18 @@ func (dp *dataPartition) StartRaft() (err error) {
 func (dp *dataPartition) stopRaft() {
 	if dp.raftPartition != nil {
 		dp.raftPartition.Stop()
+		dp.raftPartition = nil
 	}
 	return
 }
 
-func (dp *dataPartition) startSchedule()  {
+func (dp *dataPartition) startSchedule() {
 	var isRunning bool = false
 	timer := time.NewTimer(time.Hour)
 	timer.Stop()
 
 	dumpFunc := func(applyIndex uint64) {
-		log.LogDebugf("[startSchedule] partitionId=%d: applyID=%d",	dp.config.PartitionId, applyIndex)
+		log.LogDebugf("[startSchedule] partitionId=%d: applyID=%d", dp.config.PartitionId, applyIndex)
 		if err := dp.storeApplyIndex(applyIndex); err != nil {
 			//retry
 			dp.storeC <- applyIndex
@@ -146,9 +147,23 @@ func (dp *dataPartition) startSchedule()  {
 				indexes = nil
 			case applyIndex := <-dp.storeC:
 				indexes = append(indexes, applyIndex)
+			case opRaft := <-dp.raftC:
+				switch opRaft {
+				case opStartRaft:
+					if dp.raftPartition == nil {
+						if err := dp.StartRaft(); err != nil {
+							panic("start raft error")
+						}
+					}
+				case opStopRaft:
+					dp.stopRaft()
+				}
+				case <-dp.repirC:
+
 			case <-timer.C:
 				// Truncate raft log
-				//dp.raftPartition.Truncate(dp.applyId)
+				//TODO send msg get all replicates applied index. truncate the min
+				dp.raftPartition.Truncate(dp.applyId)
 			}
 		}
 	}(dp.stopC)
@@ -181,6 +196,10 @@ func (dp *dataPartition) confAddNode(req *proto.DataPartitionOfflineRequest, ind
 }
 
 func (dp *dataPartition) confRemoveNode(req *proto.DataPartitionOfflineRequest, index uint64) (updated bool, err error) {
+	if dp.raftPartition == nil {
+		err = fmt.Errorf("%s partitionId=%v applyid=%v", RaftIsNotStart, dp.partitionId, index)
+		return
+	}
 	peerIndex := -1
 	for i, peer := range dp.config.Peers {
 		if peer.ID == req.RemovePeer.ID {

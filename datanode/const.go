@@ -73,6 +73,7 @@ const (
 
 const (
 	ConnIsNullErr = "ConnIsNullErr"
+	RaftIsNotStart = "RaftIsNotStart"
 )
 
 const (
@@ -102,5 +103,14 @@ const (
 )
 
 const (
-	opRandomWrite   uint32 = iota
+	opRandomWrite uint32 = iota
+
+	opStartRaft
+	opStopRaft
+
+	opExtentRepair
+)
+
+const (
+	maxApplyErrRetry       = 10
 )

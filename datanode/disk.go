@@ -65,20 +65,21 @@ type DiskUsage struct {
 
 type Disk struct {
 	sync.RWMutex
-	Path         string
-	ReadErrs     uint64
-	WriteErrs    uint64
-	Total        uint64
-	Used         uint64
-	Available    uint64
-	Unallocated  uint64
-	Allocated    uint64
-	MaxErrs      int
-	Status       int
-	RestSize     uint64
-	partitionMap map[uint32]DataPartition
-	compactCh    chan *CompactTask
-	space        SpaceManager
+	Path          string
+	ReadErrs      uint64
+	WriteErrs     uint64
+	RandWriteErrs uint64
+	Total         uint64
+	Used          uint64
+	Available     uint64
+	Unallocated   uint64
+	Allocated     uint64
+	MaxErrs       int
+	Status        int
+	RestSize      uint64
+	partitionMap  map[uint32]DataPartition
+	compactCh     chan *CompactTask
+	space         SpaceManager
 }
 
 type PartitionVisitor func(dp DataPartition)
@@ -186,6 +187,10 @@ func (d *Disk) addWriteErr() {
 	atomic.AddUint64(&d.WriteErrs, 1)
 }
 
+func (d *Disk) addRandWriteErr() {
+	atomic.AddUint64(&d.RandWriteErrs, 1)
+}
+
 func (d *Disk) startScheduleTasks() {
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
@@ -205,7 +210,7 @@ func (d *Disk) updateSpaceInfo() (err error) {
 		d.addReadErr()
 	}
 	currErrs := d.ReadErrs + d.WriteErrs
-	if currErrs >= uint64(d.MaxErrs) {
+	if currErrs >= uint64(d.MaxErrs) || d.RandWriteErrs > 0 {
 		d.Status = proto.Unavaliable
 	} else if d.Available <= 0 {
 		d.Status = proto.ReadOnly
@@ -213,8 +218,8 @@ func (d *Disk) updateSpaceInfo() (err error) {
 		d.Status = proto.ReadWrite
 	}
 	log.LogDebugf("action[updateSpaceInfo] disk[%v] total[%v] available[%v] remain[%v] "+
-		"restSize[%v] maxErrs[%v] readErrs[%v] writeErrs[%v] status[%v]", d.Path,
-		d.Total, d.Available, d.Unallocated, d.RestSize, d.MaxErrs, d.ReadErrs, d.WriteErrs, d.Status)
+		"restSize[%v] maxErrs[%v] readErrs[%v] writeErrs[%v] randWriteErrs[%v] status[%v]", d.Path,
+		d.Total, d.Available, d.Unallocated, d.RestSize, d.MaxErrs, d.ReadErrs, d.WriteErrs, d.RandWriteErrs, d.Status)
 	return
 }
 

@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 
 	"github.com/tiglabs/containerfs/util/log"
-	"github.com/tiglabs/containerfs/raftstore"
 	"github.com/tiglabs/containerfs/storage"
 )
 
@@ -115,20 +114,7 @@ func (dp *dataPartition) RandomWriteSubmit(pkg *Packet) (err error) {
 	}
 
 	pkg.ResultCode = resp.(uint8)
-	log.LogDebugf("[rndWrtSubmit] raft sync: response status = %v.", pkg.GetResultMesg())
-	return
-}
-
-func (dp *dataPartition) GetRaftPartition() (raftPartition *raftstore.Partition) {
-	return &dp.raftPartition
-}
-
-func (dp *dataPartition) randomWriteStore(opItem *rndWrtOpItem) (err error) {
-	err = dp.GetExtentStore().Write(opItem.extentId, opItem.offset, opItem.size, opItem.data, opItem.crc)
-	dp.addDiskErrs(err, WriteFlag)
-	if err != nil {
-		log.LogErrorf("[randomWriteStore] dp[%v] write err[%v]", dp.ID(), err)
-	}
+	log.LogDebugf("[randomWriteDebug] Submit raft: response status = %v.", pkg.GetResultMesg())
 	return
 }
 
@@ -145,9 +131,7 @@ func (dp *dataPartition) addDiskErrs(err error, flag uint8) {
 		return
 	}
 	if flag == WriteFlag {
-		d.addWriteErr()
-	} else if flag == ReadFlag {
-		d.addReadErr()
+		d.addRandWriteErr()
 	}
 }
 
@@ -168,6 +152,9 @@ func (dp *dataPartition) RandomPartitionReadCheck(request *Packet, connect net.C
 			dp.partitionId, dp.applyId, dp.raftPartition.CommittedIndex())
 		return
 	}
+
+	log.LogDebugf("[randomWriteDebug] read check pass! dp=%v applied=%v committed=%v",
+		dp.partitionId, dp.applyId, dp.raftPartition.CommittedIndex())
 	return
 }
 
