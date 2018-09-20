@@ -158,7 +158,7 @@ func (dp *dataPartition) startSchedule() {
 				case opStopRaft:
 					dp.stopRaft()
 				}
-				case <-dp.repirC:
+				case <-dp.repairC:
 
 			case <-timer.C:
 				// Truncate raft log
