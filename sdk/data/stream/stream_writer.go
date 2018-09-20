@@ -16,6 +16,7 @@ package stream
 
 import (
 	"fmt"
+	"hash/crc32"
 	"net"
 	"strings"
 	"sync/atomic"
@@ -216,21 +217,19 @@ func (stream *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error)
 	}
 
 	sc := NewStreamConn(dp)
-	if err != nil {
-		log.LogWarnf("doRewrite: failed to get connection to (%v)", dp.LeaderAddr)
-	}
 
 	for total < size {
 		reqPacket := NewWritePacket(dp, req.ExtentKey.ExtentId, offset-ekOffset+total, offset, true)
 		packSize := util.Min(size-total, util.BlockSize)
 		copy(reqPacket.Data[:packSize], req.Data[total:total+packSize])
 		reqPacket.Size = uint32(packSize)
+		reqPacket.Crc = crc32.ChecksumIEEE(reqPacket.Data[:packSize])
 
 		replyPacket := new(Packet)
 		err = sc.Send(reqPacket, func(conn *net.TCPConn) (error, bool) {
 			e := replyPacket.ReadFromConn(conn, proto.ReadDeadlineTime)
 			if e != nil {
-				return errors.Annotatef(e, "sendToConn: failed to read from connect"), false
+				return errors.Annotatef(e, "Stream Writer doRewrite: failed to read from connect"), false
 			}
 
 			if replyPacket.ResultCode == proto.OpAgain {
@@ -238,7 +237,7 @@ func (stream *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error)
 			}
 
 			if replyPacket.ResultCode == proto.OpNotLeaderErr {
-				e = errors.New(fmt.Sprintf("sendToConn: Not leader"))
+				e = errors.New(fmt.Sprintf("Stream Writer doRewrite: Not leader"))
 			}
 			return e, false
 		})

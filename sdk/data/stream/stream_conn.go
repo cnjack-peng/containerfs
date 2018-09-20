@@ -46,8 +46,7 @@ func (sc *StreamConn) Send(req *Packet, getReply GetReplyFunc) (err error) {
 		if err == nil {
 			return
 		}
-		log.LogWarnf("Send: retry in %v", StreamSendSleepInterval)
-		time.Sleep(StreamSendSleepInterval)
+		log.LogWarnf("Send: err(%v)", err)
 	}
 	return errors.New(fmt.Sprintf("Send: retried %v times and still failed, sc(%v)", StreamSendMaxRetry, sc))
 }
@@ -81,7 +80,7 @@ func (sc *StreamConn) sendToPartition(req *Packet, getReply GetReplyFunc) (err e
 
 func (sc *StreamConn) sendToConn(conn *net.TCPConn, req *Packet, getReply GetReplyFunc) (err error) {
 	for i := 0; i < StreamSendMaxRetry; i++ {
-		err = req.writeTo(conn)
+		err = req.WriteToConn(conn)
 		if err != nil {
 			err = errors.Annotatef(err, "sendToConn: failed to write to connect sc(%v)", sc)
 			break
