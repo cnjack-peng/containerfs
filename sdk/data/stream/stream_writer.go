@@ -226,7 +226,23 @@ func (stream *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error)
 		copy(reqPacket.Data[:packSize], req.Data[total:total+packSize])
 		reqPacket.Size = uint32(packSize)
 
-		replyPacket, err := sc.Send(reqPacket)
+		replyPacket := new(Packet)
+		err = sc.Send(reqPacket, func(conn *net.TCPConn) (error, bool) {
+			e := replyPacket.ReadFromConn(conn, proto.ReadDeadlineTime)
+			if e != nil {
+				return errors.Annotatef(e, "sendToConn: failed to read from connect"), false
+			}
+
+			if replyPacket.ResultCode == proto.OpAgain {
+				return nil, true
+			}
+
+			if replyPacket.ResultCode == proto.OpNotLeaderErr {
+				e = errors.New(fmt.Sprintf("sendToConn: Not leader"))
+			}
+			return e, false
+		})
+
 		if err != nil {
 			log.LogErrorf("doRewrite failed: err(%v)", err)
 			break

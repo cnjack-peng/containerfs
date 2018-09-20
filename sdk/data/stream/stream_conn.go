@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/juju/errors"
-	"github.com/tiglabs/containerfs/proto"
 	"github.com/tiglabs/containerfs/sdk/data/wrapper"
 	"github.com/tiglabs/containerfs/util/log"
 	"github.com/tiglabs/containerfs/util/pool"
@@ -16,6 +15,8 @@ const (
 	StreamSendMaxRetry      = 100
 	StreamSendSleepInterval = 100 * time.Millisecond
 )
+
+type GetReplyFunc func(conn *net.TCPConn) (err error, again bool)
 
 type StreamConn struct {
 	partition uint32
@@ -39,22 +40,22 @@ func (sc *StreamConn) String() string {
 	return fmt.Sprintf("Partition(%v) Leader(%v) Hosts(%v)", sc.partition, sc.currAddr, sc.hosts)
 }
 
-func (sc *StreamConn) Send(req *Packet) (resp *Packet, err error) {
+func (sc *StreamConn) Send(req *Packet, getReply GetReplyFunc) (err error) {
 	for i := 0; i < StreamSendMaxRetry; i++ {
-		resp, err = sc.sendToPartition(req)
+		err = sc.sendToPartition(req, getReply)
 		if err == nil {
 			return
 		}
 		log.LogWarnf("Send: retry in %v", StreamSendSleepInterval)
 		time.Sleep(StreamSendSleepInterval)
 	}
-	return nil, errors.New(fmt.Sprintf("Send: retried %v times and still failed, sc(%v)", StreamSendMaxRetry, sc))
+	return errors.New(fmt.Sprintf("Send: retried %v times and still failed, sc(%v)", StreamSendMaxRetry, sc))
 }
 
-func (sc *StreamConn) sendToPartition(req *Packet) (resp *Packet, err error) {
+func (sc *StreamConn) sendToPartition(req *Packet, getReply GetReplyFunc) (err error) {
 	conn, err := StreamConnPool.Get(sc.currAddr)
 	if err == nil {
-		resp, err = sc.sendToConn(conn, req)
+		err = sc.sendToConn(conn, req, getReply)
 		if err == nil {
 			StreamConnPool.Put(conn, false)
 			return
@@ -67,7 +68,7 @@ func (sc *StreamConn) sendToPartition(req *Packet) (resp *Packet, err error) {
 		if err != nil {
 			continue
 		}
-		resp, err = sc.sendToConn(conn, req)
+		err = sc.sendToConn(conn, req, getReply)
 		if err == nil {
 			sc.currAddr = addr
 			StreamConnPool.Put(conn, false)
@@ -75,10 +76,10 @@ func (sc *StreamConn) sendToPartition(req *Packet) (resp *Packet, err error) {
 		}
 		StreamConnPool.Put(conn, true)
 	}
-	return nil, errors.New(fmt.Sprintf("sendToPatition Failed: sc(%v)", sc))
+	return errors.New(fmt.Sprintf("sendToPatition Failed: sc(%v)", sc))
 }
 
-func (sc *StreamConn) sendToConn(conn *net.TCPConn, req *Packet) (resp *Packet, err error) {
+func (sc *StreamConn) sendToConn(conn *net.TCPConn, req *Packet, getReply GetReplyFunc) (err error) {
 	for i := 0; i < StreamSendMaxRetry; i++ {
 		err = req.writeTo(conn)
 		if err != nil {
@@ -86,17 +87,11 @@ func (sc *StreamConn) sendToConn(conn *net.TCPConn, req *Packet) (resp *Packet, 
 			break
 		}
 
-		resp = new(Packet)
-		err = resp.ReadFromConn(conn, proto.ReadDeadlineTime)
-		if err != nil {
-			err = errors.Annotatef(err, "sendToConn: failed to read from connect sc(%v)", sc)
-			break
-		}
-
-		if resp.ResultCode == proto.OpNotLeaderErr {
-			err = errors.New(fmt.Sprintf("sendToConn: Not leader sc(%v)", sc))
-			break
-		} else if resp.ResultCode != proto.OpAgain {
+		err, again := getReply(conn)
+		if !again {
+			if err != nil {
+				err = errors.Annotatef(err, "sc(%v)", sc)
+			}
 			break
 		}
 
@@ -105,7 +100,6 @@ func (sc *StreamConn) sendToConn(conn *net.TCPConn, req *Packet) (resp *Packet, 
 
 	if err != nil {
 		log.LogWarn(err)
-		return nil, err
 	}
-	return resp, nil
+	return
 }
