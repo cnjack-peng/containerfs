@@ -71,7 +71,7 @@ var (
 
 type ExtentReader struct {
 	inode uint64
-	key   proto.ExtentKey
+	key   *proto.ExtentKey
 	dp    *wrapper.DataPartition
 }
 
@@ -117,9 +117,8 @@ func (reader *ExtentReader) forceDestoryAllConnect(host string) {
 	ReadConnectPool.ReleaseAllConnect(host)
 }
 
-func (reader *ExtentReader) streamReadDataFromHost(offset, expectReadSize int, data []byte, kerneloffset,
-	kernelsize int) (actualReadSize int, host string, err error) {
-	request := NewStreamReadPacket(&reader.key, offset, expectReadSize)
+func (reader *ExtentReader) streamReadDataFromHost(offset, expectReadSize int, data []byte, kerneloffset, kernelsize int) (actualReadSize int, host string, err error) {
+	request := NewStreamReadPacket(reader.key, offset, expectReadSize)
 	var connect *net.TCPConn
 	host = reader.dp.LeaderAddr
 	connect, err = ReadConnectPool.Get(host)
