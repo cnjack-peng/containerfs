@@ -479,7 +479,6 @@ func (c *Cluster) dealDataNodeHeartbeatResp(nodeAddr string, resp *proto.DataNod
 	var (
 		dataNode *DataNode
 		logMsg   string
-		oldRack  *Rack
 	)
 	log.LogInfof("action[dealDataNodeHeartbeatResp] clusterID[%v] receive dataNode[%v] heartbeat, ", c.Name, nodeAddr)
 	if resp.Status != proto.TaskSuccess {
@@ -495,16 +494,13 @@ func (c *Cluster) dealDataNodeHeartbeatResp(nodeAddr string, resp *proto.DataNod
 	if dataNode.RackName != "" && dataNode.RackName != resp.RackName {
 		Warn(c.Name, fmt.Sprintf("ClusterID[%s] DataNode[%v] rack from [%v] to [%v]!",
 			c.Name, nodeAddr, dataNode.RackName, resp.RackName))
-		if oldRack, err = c.t.getRack(dataNode.RackName); err == nil {
-			oldRack.RemoveDataNode(dataNode.Addr)
-		}
 		dataNode.RackName = resp.RackName
-		c.t.putDataNode(dataNode)
+		c.t.replaceDataNode(dataNode)
 	}
 
 	dataNode.UpdateNodeMetric(resp)
 	dataNode.setNodeAlive()
-	c.t.putDataNode(dataNode)
+	c.t.PutDataNode(dataNode)
 	c.UpdateDataNode(dataNode, resp.PartitionInfo)
 	dataNode.dataPartitionInfos = nil
 	logMsg = fmt.Sprintf("action[dealDataNodeHeartbeatResp],dataNode:%v ReportTime:%v  success", dataNode.Addr, time.Now().Unix())

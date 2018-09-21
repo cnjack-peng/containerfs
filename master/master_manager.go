@@ -84,6 +84,10 @@ func (m *Master) loadMetadata() {
 		panic(err)
 	}
 
+	if err = m.cluster.loadNodeSets(); err != nil {
+		panic(err)
+	}
+
 	if err = m.cluster.loadDataNodes(); err != nil {
 		panic(err)
 	}

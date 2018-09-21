@@ -47,6 +47,7 @@ type DataNode struct {
 	Sender             *AdminTaskSender
 	dataPartitionInfos []*proto.PartitionReport
 	DataPartitionCount uint32
+	NodeSetId          uint64
 }
 
 func NewDataNode(addr, clusterID string) (dataNode *DataNode) {

@@ -40,6 +40,7 @@ var (
 	CannotOffLineErr                    = errors.New("cannot offline because avail data replica <0")
 	NoAnyDataNodeForCreateDataPartition = errors.New("no have enough data server for create data partition")
 	NoRackForCreateDataPartition        = errors.New("no rack for create data partition")
+	NoNodeSetForCreateDataPartition        = errors.New("no node set for create data partition")
 	NoAnyMetaNodeForCreateMetaPartition = errors.New("no have enough meta server for create meta partition")
 	MetaReplicaExcessError              = errors.New("meta partition Replication Excess error")
 	NoHaveMajorityReplica               = errors.New("no have majority replica error")

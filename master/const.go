@@ -49,7 +49,8 @@ const (
 	RuntimeStackBufSize                     = 4096
 	NodesAliveRate                  float32 = 0.5
 	//MinReadWriteDataPartitions              = 200
-	SpaceAvailRate = 0.95
+	SpaceAvailRate         = 0.95
+	DefaultNodeSetCapacity = 6
 
 	//todo remove after docker test
 	MinReadWriteDataPartitions = 2

@@ -43,6 +43,7 @@ const (
 	OpSyncDeleteVol            uint32 = 0x0F
 	OpSyncDeleteDataPartition  uint32 = 0x10
 	OpSyncDeleteMetaPartition  uint32 = 0x11
+	OpSyncAddNodeSet           uint32 = 0x12
 )
 
 const (
@@ -53,12 +54,14 @@ const (
 	MetaPartitionAcronym = "mp"
 	VolAcronym           = "vol"
 	ClusterAcronym       = "c"
+	NodeSetAcronym       = "s"
 	MetaNodePrefix       = KeySeparator + MetaNodeAcronym + KeySeparator
 	DataNodePrefix       = KeySeparator + DataNodeAcronym + KeySeparator
 	DataPartitionPrefix  = KeySeparator + DataPartitionAcronym + KeySeparator
 	VolPrefix            = KeySeparator + VolAcronym + KeySeparator
 	MetaPartitionPrefix  = KeySeparator + MetaPartitionAcronym + KeySeparator
 	ClusterPrefix        = KeySeparator + ClusterAcronym + KeySeparator
+	NodeSetPrefix        = KeySeparator + NodeSetAcronym + KeySeparator
 )
 
 type MetaPartitionValue struct {
@@ -120,6 +123,41 @@ func newVolValue(vol *Vol) (vv *VolValue) {
 	return
 }
 
+type DataNodeValue struct {
+	Id        uint64
+	NodeSetId uint64
+}
+
+func newDataNodeValue(dataNode *DataNode) *DataNodeValue {
+	return &DataNodeValue{
+		Id:        dataNode.Id,
+		NodeSetId: dataNode.NodeSetId,
+	}
+}
+
+type MetaNodeValue struct {
+	NodeSetId uint64
+}
+
+func newMetaNodeValue(metaNode *MetaNode) *MetaNodeValue {
+	return &MetaNodeValue{
+		NodeSetId: metaNode.NodeSetId,
+	}
+}
+
+type NodeSetValue struct {
+	Id       uint64
+	Capacity int
+}
+
+func newNodeSetValue(nset *NodeSet) (nsv *NodeSetValue) {
+	nsv = &NodeSetValue{
+		Id:       nset.Id,
+		Capacity: nset.Capacity,
+	}
+	return
+}
+
 type Metadata struct {
 	Op uint32 `json:"op"`
 	K  string `json:"k"`
@@ -174,6 +212,19 @@ func (c *Cluster) syncPutCluster() (err error) {
 	metadata := new(Metadata)
 	metadata.Op = OpSyncPutCluster
 	metadata.K = ClusterPrefix + c.Name + KeySeparator + strconv.FormatBool(c.compactStatus)
+	return c.submit(metadata)
+}
+
+//key=#s#id
+func (c *Cluster) syncAddNodeSet(nset *NodeSet) (err error) {
+	metadata := new(Metadata)
+	metadata.Op = OpSyncAddNodeSet
+	metadata.K = NodeSetPrefix + strconv.FormatUint(nset.Id, 64)
+	nsv := newNodeSetValue(nset)
+	metadata.V, err = json.Marshal(nsv)
+	if err != nil {
+		return
+	}
 	return c.submit(metadata)
 }
 
@@ -278,6 +329,8 @@ func (c *Cluster) syncAddMetaNode(metaNode *MetaNode) (err error) {
 	metadata := new(Metadata)
 	metadata.Op = OpSyncAddMetaNode
 	metadata.K = MetaNodePrefix + strconv.FormatUint(metaNode.ID, 10) + KeySeparator + metaNode.Addr
+	mnv := newMetaNodeValue(metaNode)
+	metadata.V, err = json.Marshal(mnv)
 	return c.submit(metadata)
 }
 
@@ -288,18 +341,20 @@ func (c *Cluster) syncDeleteMetaNode(metaNode *MetaNode) (err error) {
 	return c.submit(metadata)
 }
 
-//key=#dn#id#httpAddr,value = nil
+//key=#dn#Addr,value = json.Marshal(dnv)
 func (c *Cluster) syncAddDataNode(dataNode *DataNode) (err error) {
 	metadata := new(Metadata)
 	metadata.Op = OpSyncAddDataNode
-	metadata.K = DataNodePrefix + strconv.FormatUint(dataNode.Id, 10) + KeySeparator + dataNode.Addr
+	metadata.K = DataNodePrefix + dataNode.Addr
+	dnv := newDataNodeValue(dataNode)
+	metadata.V, err = json.Marshal(dnv)
 	return c.submit(metadata)
 }
 
 func (c *Cluster) syncDeleteDataNode(dataNode *DataNode) (err error) {
 	metadata := new(Metadata)
 	metadata.Op = OpSyncDeleteDataNode
-	metadata.K = DataNodePrefix + strconv.FormatUint(dataNode.Id, 10) + KeySeparator + dataNode.Addr
+	metadata.K = DataNodePrefix + dataNode.Addr
 	return c.submit(metadata)
 }
 
@@ -334,6 +389,8 @@ func (c *Cluster) handleApply(cmd *Metadata) (err error) {
 		return
 	}
 	switch cmd.Op {
+	case OpSyncAddNodeSet:
+		c.applyAddNodeSet(cmd)
 	case OpSyncAddDataNode:
 		c.applyAddDataNode(cmd)
 	case OpSyncAddMetaNode:
@@ -366,6 +423,20 @@ func (c *Cluster) handleApply(cmd *Metadata) (err error) {
 		c.idAlloc.increaseMetaPartitionID()
 	}
 	return
+}
+
+func (c *Cluster) applyAddNodeSet(cmd *Metadata) {
+	log.LogInfof("action[applyAddNodeSet] cmd:%v", cmd.K)
+	keys := strings.Split(cmd.K, KeySeparator)
+	if keys[1] != NodeSetAcronym {
+		return
+	}
+	setId, err := strconv.ParseUint(keys[2], 10, 64)
+	if err != nil {
+		return
+	}
+	ns := newNodeSet(setId, DefaultNodeSetCapacity)
+	c.t.putNodeSet(ns)
 }
 
 func (c *Cluster) applyPutCluster(cmd *Metadata) {
@@ -409,15 +480,18 @@ func (c *Cluster) applyAddDataNode(cmd *Metadata) {
 	log.LogInfof("action[applyAddDataNode] cmd:%v", cmd.K)
 	keys := strings.Split(cmd.K, KeySeparator)
 	var (
-		id  uint64
 		err error
 	)
 	if keys[1] == DataNodeAcronym {
-		dataNode := NewDataNode(keys[3], c.Name)
-		if id, err = strconv.ParseUint(keys[2], 10, 64); err != nil {
+		dataNode := NewDataNode(keys[2], c.Name)
+		dnv := &DataNodeValue{}
+		if err = json.Unmarshal(cmd.V, dnv); err != nil {
 			return
 		}
-		dataNode.Id = id
+		dataNode.Lock()
+		dataNode.Id = dnv.Id
+		dataNode.NodeSetId = dnv.NodeSetId
+		dataNode.Unlock()
 		c.dataNodes.Store(dataNode.Addr, dataNode)
 	}
 }
@@ -433,9 +507,16 @@ func (c *Cluster) applyAddMetaNode(cmd *Metadata) (err error) {
 		if _, err = c.getMetaNode(addr); err != nil {
 			metaNode := NewMetaNode(addr, c.Name)
 			if id, err = strconv.ParseUint(keys[2], 10, 64); err != nil {
+				log.LogErrorf("action[applyAddMetaNode] cmd.K:%v,err[%v]", cmd.K, err.Error())
 				return
 			}
 			metaNode.ID = id
+			mnv := &MetaNodeValue{}
+			if err = json.Unmarshal(cmd.V, mnv); err != nil {
+				log.LogErrorf("action[applyAddMetaNode] cmd.V:%v,err[%v]", cmd.V, err.Error())
+				return
+			}
+			metaNode.NodeSetId = mnv.NodeSetId
 			c.metaNodes.Store(metaNode.Addr, metaNode)
 		}
 	}
@@ -602,6 +683,29 @@ func (c *Cluster) loadCompactStatus() (err error) {
 	return
 }
 
+func (c *Cluster) loadNodeSets() (err error) {
+	snapshot := c.fsm.store.RocksDBSnapshot()
+	it := c.fsm.store.Iterator(snapshot)
+	defer func() {
+		it.Close()
+		c.fsm.store.ReleaseSnapshot(snapshot)
+	}()
+	prefixKey := []byte(NodeSetPrefix)
+	it.Seek(prefixKey)
+	for ; it.ValidForPrefix(prefixKey); it.Next() {
+		encodedKey := it.Key()
+		setId, err1 := c.decodeNodeSetKey(string(encodedKey.Data()))
+		if err1 != nil {
+			err = fmt.Errorf("action[loadNodeSets] value[%v],err:%v", string(encodedKey.Data()), err1.Error())
+			return err
+		}
+		ns := newNodeSet(setId, DefaultNodeSetCapacity)
+		c.t.putNodeSet(ns)
+		encodedKey.Free()
+	}
+	return
+}
+
 func (c *Cluster) loadDataNodes() (err error) {
 	snapshot := c.fsm.store.RocksDBSnapshot()
 	it := c.fsm.store.Iterator(snapshot)
@@ -614,23 +718,27 @@ func (c *Cluster) loadDataNodes() (err error) {
 
 	for ; it.ValidForPrefix(prefixKey); it.Next() {
 		encodedKey := it.Key()
-		nodeID, addr, err1 := c.decodeMetaNodeKey(string(encodedKey.Data()))
-		if err1 != nil {
-			err = fmt.Errorf("action[loadDataNodes] err:%v", err1.Error())
-			return err
+		encodeValue := it.Value()
+		keys := strings.Split(string(encodedKey.Data()), KeySeparator)
+		dataNode := NewDataNode(keys[2], c.Name)
+		dnv := &DataNodeValue{}
+
+		if err := json.Unmarshal(encodeValue.Data(), dnv); err != nil {
+			err = fmt.Errorf("action[loadDataNodes],value:%v,err:%v", string(encodeValue.Data()), err)
+			return
 		}
-		dataNode := NewDataNode(addr, c.Name)
-		dataNode.Id = nodeID
+		dataNode.Id = dnv.Id
+		dataNode.NodeSetId = dnv.NodeSetId
 		c.dataNodes.Store(dataNode.Addr, dataNode)
 		encodedKey.Free()
+		encodeValue.Free()
 	}
 	return
 }
 
-func (c *Cluster) decodeDataNodeKey(key string) (nodeID uint64, addr string, err error) {
+func (c *Cluster) decodeNodeSetKey(key string) (setId uint64, err error) {
 	keys := strings.Split(key, KeySeparator)
-	addr = keys[3]
-	nodeID, err = strconv.ParseUint(keys[2], 10, 64)
+	setId, err = strconv.ParseUint(keys[2], 10, 64)
 	return
 }
 
@@ -653,13 +761,20 @@ func (c *Cluster) loadMetaNodes() (err error) {
 
 	for ; it.ValidForPrefix(prefixKey); it.Next() {
 		encodedKey := it.Key()
+		encodeValue := it.Value()
 		nodeID, addr, err1 := c.decodeMetaNodeKey(string(encodedKey.Data()))
 		if err1 != nil {
 			err = fmt.Errorf("action[loadMetaNodes] err:%v", err1.Error())
 			return err
 		}
+		mnv := &MetaNodeValue{}
+		if err = json.Unmarshal(encodeValue.Data(), mnv); err != nil {
+			err = fmt.Errorf("action[loadMetaNodes] err:%v", err.Error())
+			return err
+		}
 		metaNode := NewMetaNode(addr, c.Name)
 		metaNode.ID = nodeID
+		metaNode.NodeSetId = mnv.NodeSetId
 		c.metaNodes.Store(addr, metaNode)
 		encodedKey.Free()
 	}

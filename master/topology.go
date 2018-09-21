@@ -26,56 +26,198 @@ import (
 )
 
 type Topology struct {
-	rackIndex int
-	rackMap   map[string]*Rack
-	racks     []string
-	rackLock  sync.RWMutex
+	setIndex   uint64
+	dataNodes  sync.Map
+	metaNodes  sync.Map
+	nodeSetMap map[uint64]*NodeSet
+	nsLock     sync.RWMutex
 }
 
 func NewTopology() (t *Topology) {
 	t = new(Topology)
-	t.rackMap = make(map[string]*Rack)
-	t.racks = make([]string, 0)
+	t.nodeSetMap = make(map[uint64]*NodeSet)
 	return
 }
 
-type Rack struct {
-	name      string
-	dataNodes sync.Map
-	sync.RWMutex
+type TopoDataNode struct {
+	*DataNode
+	setId uint64
 }
 
-func NewRack(name string) (rack *Rack) {
-	return &Rack{name: name}
+func newTopoDataNode(dataNode *DataNode, setId uint64) *TopoDataNode {
+	return &TopoDataNode{
+		DataNode: dataNode,
+		setId:    setId,
+	}
 }
 
-func (t *Topology) isSingleRack() bool {
-	t.rackLock.RLock()
-	defer t.rackLock.RUnlock()
-	return len(t.rackMap) == 1
+func (t *Topology) replaceDataNode(dataNode *DataNode) {
+	if oldRack, err := t.getRack(dataNode); err == nil {
+		oldRack.PutDataNode(dataNode)
+	}
+	topoNode, ok := t.dataNodes.Load(dataNode.Addr)
+	if ok {
+		node := topoNode.(*TopoDataNode)
+		node.RackName = dataNode.RackName
+		t.putDataNodeToCache(node)
+	}
 }
 
-func (t *Topology) getRack(name string) (rack *Rack, err error) {
-	t.rackLock.RLock()
-	defer t.rackLock.RUnlock()
-	rack, ok := t.rackMap[name]
+func (t *Topology) PutDataNode(dataNode *DataNode) (err error) {
+
+	if _, ok := t.dataNodes.Load(dataNode.Addr); ok {
+		return
+	}
+	var ns *NodeSet
+	if ns, err = t.getNodeSet(dataNode.NodeSetId); err != nil {
+		return
+	}
+	ns.putDataNode(dataNode)
+	node := newTopoDataNode(dataNode, ns.Id)
+	t.putDataNodeToCache(node)
+	return
+}
+
+func (t *Topology) putDataNodeToCache(dataNode *TopoDataNode) {
+	t.dataNodes.Store(dataNode.Id, dataNode)
+}
+
+func (t *Topology) getRack(dataNode *DataNode) (rack *Rack, err error) {
+	topoNode, ok := t.dataNodes.Load(dataNode.Addr)
+	if !ok {
+		return nil, errors.Annotatef(DataNodeNotFound, "%v not found", dataNode.Addr)
+	}
+	node := topoNode.(*TopoDataNode)
+	ns, err := t.getNodeSet(node.setId)
+	if err != nil {
+		return
+	}
+	return ns.getRack(node.RackName)
+}
+
+func (t *Topology) getAvailNodeSetForDataNode() (ns *NodeSet) {
+	t.nsLock.RLock()
+	defer t.nsLock.RUnlock()
+	for _, ns := range t.nodeSetMap {
+		if ns.dataNodeLen < ns.Capacity {
+			return
+		}
+	}
+	return
+}
+
+func (t *Topology) getAvailNodeSetForMetaNode() (ns *NodeSet) {
+	t.nsLock.RLock()
+	defer t.nsLock.RUnlock()
+	for _, ns := range t.nodeSetMap {
+		if ns.metaNodeLen < ns.Capacity {
+			return
+		}
+	}
+	return
+}
+
+func (t *Topology) createNodeSet(c *Cluster) (ns *NodeSet, err error) {
+	id, err := c.idAlloc.allocateMetaNodeID()
+	if err != nil {
+		return
+	}
+	ns = newNodeSet(id, DefaultNodeSetCapacity)
+	if err := c.syncAddNodeSet(ns); err != nil {
+		return
+	}
+	t.putNodeSet(ns)
+	return
+}
+
+func (t *Topology) putNodeSet(ns *NodeSet) {
+	t.nsLock.Lock()
+	defer t.nsLock.Unlock()
+	t.nodeSetMap[ns.Id] = ns
+}
+
+func (t *Topology) getNodeSet(setId uint64) (ns *NodeSet, err error) {
+	t.nsLock.RLock()
+	defer t.nsLock.RUnlock()
+	ns, ok := t.nodeSetMap[setId]
+	if !ok {
+		return nil, errors.Errorf("set %v not found", setId)
+	}
+	return
+}
+
+func (t *Topology) allocNodeSet(replicaNum uint8) (ns *NodeSet, err error) {
+	for i := 0; i < len(t.nodeSetMap); i++ {
+		if t.setIndex >= uint64(len(t.nodeSetMap)) {
+			t.setIndex = 0
+		}
+		ns = t.nodeSetMap[t.setIndex]
+		if ns.canWrite(replicaNum) {
+			return
+		}
+	}
+	log.LogError(fmt.Sprintf("action[allocNodeSet],err:%v", NoNodeSetForCreateDataPartition))
+	return nil, NoNodeSetForCreateDataPartition
+}
+
+type NodeSet struct {
+	Id          uint64
+	Capacity    int
+	rackIndex   int
+	rackMap     map[string]*Rack
+	racks       []string
+	rackLock    sync.RWMutex
+	dataNodeLen int
+	metaNodeLen int
+	nsLock      sync.RWMutex
+}
+
+func newNodeSet(id uint64, cap int) *NodeSet {
+	ns := &NodeSet{
+		Id:       id,
+		Capacity: cap,
+	}
+	ns.rackMap = make(map[string]*Rack)
+	ns.racks = make([]string, 0)
+	return ns
+}
+
+func (ns *NodeSet) canWrite(replicaNum uint8) bool {
+	for _, rack := range ns.rackMap {
+		if rack.canWrite(replicaNum) {
+			return true
+		}
+	}
+	return false
+}
+
+func (ns *NodeSet) isSingleRack() bool {
+	ns.rackLock.RLock()
+	defer ns.rackLock.RUnlock()
+	return len(ns.rackMap) == 1
+}
+
+func (ns *NodeSet) getRack(name string) (rack *Rack, err error) {
+	ns.rackLock.RLock()
+	defer ns.rackLock.RUnlock()
+	rack, ok := ns.rackMap[name]
 	if !ok {
 		return nil, errors.Annotatef(RackNotFound, "%v not found", name)
 	}
 	return
 }
 
-func (t *Topology) putRack(rack *Rack) {
-	t.rackLock.Lock()
-	defer t.rackLock.Unlock()
-	t.rackMap[rack.name] = rack
-	if ok := t.isExist(rack.name); !ok {
-		t.racks = append(t.racks, rack.name)
+func (ns *NodeSet) putRack(rack *Rack) {
+	ns.rackLock.Lock()
+	defer ns.rackLock.Unlock()
+	ns.rackMap[rack.name] = rack
+	if ok := ns.isExist(rack.name); !ok {
+		ns.racks = append(ns.racks, rack.name)
 	}
 }
 
-func (t *Topology) isExist(rackName string) (ok bool) {
-	for _, name := range t.racks {
+func (ns *NodeSet) isExist(rackName string) (ok bool) {
+	for _, name := range ns.racks {
 		if name == rackName {
 			ok = true
 			return
@@ -84,59 +226,62 @@ func (t *Topology) isExist(rackName string) (ok bool) {
 	return
 }
 
-func (t *Topology) removeRack(name string) {
-	t.rackLock.Lock()
-	defer t.rackLock.Unlock()
-	delete(t.rackMap, name)
+func (ns *NodeSet) removeRack(name string) {
+	ns.rackLock.Lock()
+	defer ns.rackLock.Unlock()
+	delete(ns.rackMap, name)
 }
 
-func (t *Topology) putDataNode(dataNode *DataNode) {
-	rack, err := t.getRack(dataNode.RackName)
+func (ns *NodeSet) putDataNode(dataNode *DataNode) {
+	rack, err := ns.getRack(dataNode.RackName)
 	if err != nil {
 		rack = NewRack(dataNode.RackName)
-		t.putRack(rack)
+		ns.putRack(rack)
 	}
 	rack.PutDataNode(dataNode)
+	ns.nsLock.Lock()
+	ns.dataNodeLen++
+	ns.nsLock.Unlock()
 }
 
-func (t *Topology) getAllRacks() (racks []*Rack) {
-	t.rackLock.RLock()
-	defer t.rackLock.RUnlock()
+func (ns *NodeSet) getAllRacks() (racks []*Rack) {
+	ns.rackLock.RLock()
+	defer ns.rackLock.RUnlock()
 	racks = make([]*Rack, 0)
-	for _, rack := range t.rackMap {
+	for _, rack := range ns.rackMap {
 		racks = append(racks, rack)
 	}
 	return
 }
 
-func (t *Topology) getRackNameByIndex(index int) (rName string) {
-	t.rackLock.RLock()
-	defer t.rackLock.RUnlock()
-	rName = t.racks[index]
+func (ns *NodeSet) getRackNameByIndex(index int) (rName string) {
+	ns.rackLock.RLock()
+	defer ns.rackLock.RUnlock()
+	rName = ns.racks[index]
 	return
 }
 
-func (t *Topology) allocRacks(replicaNum int, excludeRack []string) (racks []*Rack, err error) {
+func (ns *NodeSet) allocRacks(replicaNum int, excludeRack []string) (racks []*Rack, err error) {
 	racks = make([]*Rack, 0)
 	if excludeRack == nil {
 		excludeRack = make([]string, 0)
 	}
-	racks = t.getAllRacks()
-	if t.isSingleRack() {
+	racks = ns.getAllRacks()
+	if ns.isSingleRack() {
 		return racks, nil
 	}
 
 	for i := 0; i < len(racks); i++ {
-		if t.rackIndex >= len(racks) {
-			t.rackIndex = 0
+		if ns.rackIndex >= len(racks) {
+			ns.rackIndex = 0
 		}
-		rName := t.getRackNameByIndex(t.rackIndex)
+		rName := ns.getRackNameByIndex(ns.rackIndex)
 		if contains(excludeRack, rName) {
 			continue
 		}
-		t.rackIndex++
+		ns.rackIndex++
 		var rack *Rack
-		if rack, err = t.getRack(t.racks[t.rackIndex]); err != nil {
+		if rack, err = ns.getRack(ns.racks[ns.rackIndex]); err != nil {
 			continue
 		}
 		if rack.canWrite(1) {
@@ -157,6 +302,33 @@ func (t *Topology) allocRacks(replicaNum int, excludeRack []string) (racks []*Ra
 	return
 }
 
+type Rack struct {
+	name      string
+	dataNodes sync.Map
+	metaNodes sync.Map
+	sync.RWMutex
+}
+
+func NewRack(name string) (rack *Rack) {
+	return &Rack{name: name}
+}
+
+func (rack *Rack) PutDataNode(dataNode *DataNode) {
+	rack.dataNodes.Store(dataNode.Addr, dataNode)
+}
+
+func (rack *Rack) GetDataNode(addr string) (dataNode *DataNode, err error) {
+	value, ok := rack.dataNodes.Load(addr)
+	if !ok {
+		return nil, errors.Annotatef(DataNodeNotFound, "%v not found", addr)
+	}
+	dataNode = value.(*DataNode)
+	return
+}
+func (rack *Rack) RemoveDataNode(addr string) {
+	rack.dataNodes.Delete(addr)
+}
+
 func (rack *Rack) canWrite(replicaNum uint8) (can bool) {
 	rack.RLock()
 	defer rack.RUnlock()
@@ -173,23 +345,6 @@ func (rack *Rack) canWrite(replicaNum uint8) (can bool) {
 		return true
 	})
 	return
-}
-
-func (rack *Rack) PutDataNode(dataNode *DataNode) {
-	rack.dataNodes.Store(dataNode.Addr, dataNode)
-}
-
-func (rack *Rack) GetDataNode(addr string) (dataNode *DataNode, err error) {
-	value, ok := rack.dataNodes.Load(addr)
-	if !ok {
-		return nil, errors.Annotatef(DataNodeNotFound, "%v not found", addr)
-	}
-	dataNode = value.(*DataNode)
-	return
-}
-
-func (rack *Rack) RemoveDataNode(addr string) {
-	rack.dataNodes.Delete(addr)
 }
 
 func (rack *Rack) GetDataNodeMaxTotal() (maxTotal uint64) {

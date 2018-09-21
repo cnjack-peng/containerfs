@@ -38,6 +38,7 @@ type MetaNode struct {
 	ReportTime         time.Time
 	metaPartitionInfos []*proto.MetaPartitionReport
 	MetaPartitionCount int
+	NodeSetId          uint64
 	sync.RWMutex
 }
 

@@ -272,11 +272,17 @@ func (c *Cluster) addMetaNode(nodeAddr string) (id uint64, err error) {
 		return metaNode.ID, nil
 	}
 	metaNode = NewMetaNode(nodeAddr, c.Name)
-
+	ns := c.t.getAvailNodeSetForMetaNode()
+	if ns == nil {
+		if ns, err = c.createNodeSet(); err != nil {
+			goto errDeal
+		}
+	}
 	if id, err = c.idAlloc.allocateMetaNodeID(); err != nil {
 		goto errDeal
 	}
 	metaNode.ID = id
+	metaNode.NodeSetId = ns.Id
 	if err = c.syncAddMetaNode(metaNode); err != nil {
 		goto errDeal
 	}
@@ -290,22 +296,44 @@ errDeal:
 	return
 }
 
+func (c *Cluster) createNodeSet() (ns *NodeSet, err error) {
+	var id uint64
+	if id, err = c.idAlloc.allocateMetaNodeID(); err != nil {
+		return
+	}
+	ns = newNodeSet(id, DefaultNodeSetCapacity)
+	if err = c.syncAddNodeSet(ns); err != nil {
+		return
+	}
+	c.t.putNodeSet(ns)
+	return
+}
+
 func (c *Cluster) addDataNode(nodeAddr string) (id uint64, err error) {
-	var dataNode *DataNode
+	var (
+		dataNode *DataNode
+	)
 	if node, ok := c.dataNodes.Load(nodeAddr); ok {
 		dataNode = node.(*DataNode)
 		return dataNode.Id, nil
 	}
 
 	dataNode = NewDataNode(nodeAddr, c.Name)
+	ns := c.t.getAvailNodeSetForDataNode()
+	if ns == nil {
+		if ns, err = c.createNodeSet(); err != nil {
+			goto errDeal
+		}
+	}
 	//allocate dataNode id
 	if id, err = c.idAlloc.allocateMetaNodeID(); err != nil {
 		goto errDeal
 	}
+	dataNode.Id = id
+	dataNode.NodeSetId = ns.Id
 	if err = c.syncAddDataNode(dataNode); err != nil {
 		goto errDeal
 	}
-	dataNode.Id = id
 	c.dataNodes.Store(nodeAddr, dataNode)
 	return
 errDeal:
@@ -423,9 +451,13 @@ func (c *Cluster) ChooseTargetDataHosts(replicaNum int) (hosts []string, peers [
 	)
 	hosts = make([]string, 0)
 	peers = make([]proto.Peer, 0)
-	if c.t.isSingleRack() {
+	ns, err := c.t.allocNodeSet(uint8(replicaNum))
+	if err != nil {
+		return nil,nil,errors.Trace(err)
+	}
+	if ns.isSingleRack() {
 		var newHosts []string
-		if rack, err = c.t.getRack(c.t.racks[0]); err != nil {
+		if rack, err = ns.getRack(ns.racks[0]); err != nil {
 			return nil, nil, errors.Trace(err)
 		}
 		if newHosts, peers, err = rack.getAvailDataNodeHosts(hosts, replicaNum); err != nil {
@@ -435,7 +467,7 @@ func (c *Cluster) ChooseTargetDataHosts(replicaNum int) (hosts []string, peers [
 		return
 	}
 
-	if racks, err = c.t.allocRacks(replicaNum, nil); err != nil {
+	if racks, err = ns.allocRacks(replicaNum, nil); err != nil {
 		return nil, nil, errors.Trace(err)
 	}
 
@@ -556,7 +588,7 @@ func (c *Cluster) dataPartitionOffline(offlineAddr, volName string, dp *DataPart
 	if dataNode.RackName == "" {
 		return
 	}
-	if rack, err = c.t.getRack(dataNode.RackName); err != nil {
+	if rack, err = c.t.getRack(dataNode); err != nil {
 		goto errDeal
 	}
 	if newHosts, newPeers, err = rack.getAvailDataNodeHosts(dp.PersistenceHosts, 1); err != nil {
