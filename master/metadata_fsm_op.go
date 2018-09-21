@@ -723,7 +723,7 @@ func (c *Cluster) loadDataNodes() (err error) {
 		dataNode := NewDataNode(keys[2], c.Name)
 		dnv := &DataNodeValue{}
 
-		if err := json.Unmarshal(encodeValue.Data(), dnv); err != nil {
+		if err = json.Unmarshal(encodeValue.Data(), dnv); err != nil {
 			err = fmt.Errorf("action[loadDataNodes],value:%v,err:%v", string(encodeValue.Data()), err)
 			return
 		}

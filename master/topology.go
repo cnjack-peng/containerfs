@@ -98,7 +98,7 @@ func (t *Topology) getRack(dataNode *DataNode) (rack *Rack, err error) {
 func (t *Topology) getAvailNodeSetForDataNode() (ns *NodeSet) {
 	t.nsLock.RLock()
 	defer t.nsLock.RUnlock()
-	for _, ns := range t.nodeSetMap {
+	for _, ns = range t.nodeSetMap {
 		if ns.dataNodeLen < ns.Capacity {
 			return
 		}
@@ -109,7 +109,7 @@ func (t *Topology) getAvailNodeSetForDataNode() (ns *NodeSet) {
 func (t *Topology) getAvailNodeSetForMetaNode() (ns *NodeSet) {
 	t.nsLock.RLock()
 	defer t.nsLock.RUnlock()
-	for _, ns := range t.nodeSetMap {
+	for _, ns = range t.nodeSetMap {
 		if ns.metaNodeLen < ns.Capacity {
 			return
 		}
@@ -123,7 +123,7 @@ func (t *Topology) createNodeSet(c *Cluster) (ns *NodeSet, err error) {
 		return
 	}
 	ns = newNodeSet(id, DefaultNodeSetCapacity)
-	if err := c.syncAddNodeSet(ns); err != nil {
+	if err = c.syncAddNodeSet(ns); err != nil {
 		return
 	}
 	t.putNodeSet(ns)
