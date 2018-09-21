@@ -32,41 +32,32 @@ type ReadRequest struct {
 	isResponse bool
 }
 
-type StreamReader struct {
-	client   *ExtentClient
-	extents  *ExtentCache
-	inode    uint64
-	fileSize uint64
+type Streamer struct {
+	client  *ExtentClient
+	extents *ExtentCache
+	inode   uint64
+	refcnt  uint64
+	writer  *StreamWriter
 }
 
-func (stream *StreamReader) String() (m string) {
-	return fmt.Sprintf("inode(%v) fileSize(%v) extents(%v) ",
-		stream.inode, stream.fileSize, stream.extents.List())
-}
-
-func NewStreamReader(client *ExtentClient, inode uint64) (*StreamReader, error) {
-	stream := new(StreamReader)
-	stream.client = client
-	stream.extents = NewExtentCache()
-	stream.inode = inode
-	err := stream.GetExtents()
-	if err != nil {
-		return nil, err
+func NewStreamer(client *ExtentClient, inode uint64) *Streamer {
+	return &Streamer{
+		client:  client,
+		extents: NewExtentCache(),
+		inode:   inode,
 	}
-	return stream, nil
 }
 
-func (stream *StreamReader) GetExtents() error {
-	err := stream.extents.Refresh(stream.inode, stream.client.getExtents)
-	if err != nil {
-		return err
-	}
-	stream.fileSize = stream.extents.Size()
-	return nil
+func (s *Streamer) String() string {
+	return fmt.Sprintf("inode(%v) extents(%v)", s.inode, s.extents.List())
+}
+
+func (stream *Streamer) GetExtents() error {
+	return stream.extents.Refresh(stream.inode, stream.client.getExtents)
 }
 
 //TODO: use memory pool
-func (stream *StreamReader) GetExtentReader(ek *proto.ExtentKey) (*ExtentReader, error) {
+func (stream *Streamer) GetExtentReader(ek *proto.ExtentKey) (*ExtentReader, error) {
 	partition, err := gDataWrapper.GetDataPartition(ek.PartitionId)
 	if err != nil {
 		return nil, err
@@ -75,18 +66,17 @@ func (stream *StreamReader) GetExtentReader(ek *proto.ExtentKey) (*ExtentReader,
 	return reader, nil
 }
 
-func (stream *StreamReader) read(data []byte, offset int, size int) (total int, err error) {
+func (stream *Streamer) read(data []byte, offset int, size int) (total int, err error) {
 	var readBytes int
 	err = stream.GetExtents()
 	if err != nil {
 		return
 	}
 	requests := stream.extents.PrepareRequest(offset, size, data)
-	log.LogDebugf("stream read: requests(%v)", requests)
+	filesize, _ := stream.extents.Size()
+	log.LogDebugf("stream read: requests(%v) filesize(%v)", requests, filesize)
 	for _, req := range requests {
 		if req.ExtentKey == nil {
-			filesize := int(stream.extents.Size())
-
 			for i, _ := range req.Data {
 				req.Data[i] = 0
 			}
@@ -100,14 +90,16 @@ func (stream *StreamReader) read(data []byte, offset int, size int) (total int, 
 
 			// Reading a hole, just fill zero
 			total += req.Size
+			log.LogDebugf("Stream read hole: req(%v) total(%v)", req, total)
 		} else {
 			reader, err := stream.GetExtentReader(req.ExtentKey)
 			if err != nil {
 				break
 			}
 			readBytes, err = reader.Read(req)
+			log.LogDebugf("Stream read: req(%v) readBytes(%v) err(%v)", req, readBytes, err)
 			total += readBytes
-			if err != nil {
+			if err != nil || readBytes < req.Size {
 				break
 			}
 		}

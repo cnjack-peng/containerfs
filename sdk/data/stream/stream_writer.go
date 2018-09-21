@@ -58,7 +58,7 @@ type CloseRequest struct {
 
 type StreamWriter struct {
 	currentWriter           *ExtentWriter //current ExtentWriter
-	client                  *ExtentClient
+	stream                  *Streamer
 	errCount                int    //error count
 	currentPartitionId      uint32 //current PartitionId
 	currentExtentId         uint64 //current FileId
@@ -71,141 +71,151 @@ type StreamWriter struct {
 	hasWriteSize            uint64
 	hasClosed               int32
 	hasUpdateToMetaNodeSize uint64
-
-	extents *ExtentCache
 }
 
-func NewStreamWriter(client *ExtentClient, inode uint64) (stream *StreamWriter, err error) {
-	stream = new(StreamWriter)
-	stream.client = client
-	stream.Inode = inode
-	stream.requestCh = make(chan interface{}, 1000)
-	stream.exitCh = make(chan bool, 10)
-	stream.excludePartition = make([]uint32, 0)
-	stream.hasUpdateKey = make(map[string]int, 0)
-	stream.extents = NewExtentCache()
-	err = stream.extents.Refresh(inode, client.getExtents)
-	if err != nil {
-		log.LogErrorf("NewStreamWriter: err(%v)", err)
-		return nil, err
-	}
-	go stream.server()
-
-	return
+func NewStreamWriter(stream *Streamer, inode uint64) *StreamWriter {
+	sw := new(StreamWriter)
+	sw.stream = stream
+	sw.Inode = inode
+	sw.requestCh = make(chan interface{}, 1000)
+	sw.exitCh = make(chan bool, 10)
+	sw.excludePartition = make([]uint32, 0)
+	sw.hasUpdateKey = make(map[string]int, 0)
+	go sw.server()
+	return sw
 }
 
-func (stream *StreamWriter) String() (m string) {
+func (sw *StreamWriter) String() (m string) {
 	currentWriterMsg := ""
-	if stream.currentWriter != nil {
-		currentWriterMsg = stream.currentWriter.String()
+	if sw.currentWriter != nil {
+		currentWriterMsg = sw.currentWriter.String()
 	}
+	return fmt.Sprintf("inode(%v) currentDataPartion(%v) currentExtentId(%v)"+" errCount(%v)", sw.Inode, sw.currentPartitionId, currentWriterMsg, sw.errCount)
+}
+
+func (sw *StreamWriter) Flush() error {
+	request := flushRequestPool.Get().(*FlushRequest)
+	request.done = make(chan struct{}, 1)
+	sw.requestCh <- request
+	<-request.done
+	err := request.err
+	flushRequestPool.Put(request)
+	return err
+}
+
+func (sw *StreamWriter) Close() error {
+	err := sw.Flush()
+	if err != nil {
+		return err
+	}
+	request := closeRequestPool.Get().(*CloseRequest)
+	request.done = make(chan struct{}, 1)
+	sw.requestCh <- request
+	<-request.done
+	closeRequestPool.Put(request)
+	return nil
+}
+
+func (sw *StreamWriter) toStringWithWriter(writer *ExtentWriter) (m string) {
 	return fmt.Sprintf("inode(%v) currentDataPartion(%v) currentExtentId(%v)"+
-		" errCount(%v)", stream.Inode, stream.currentPartitionId, currentWriterMsg,
-		stream.errCount)
+		" errCount(%v)", sw.Inode, sw.currentPartitionId, writer, sw.errCount)
 }
 
-func (stream *StreamWriter) toStringWithWriter(writer *ExtentWriter) (m string) {
-	return fmt.Sprintf("inode(%v) currentDataPartion(%v) currentExtentId(%v)"+
-		" errCount(%v)", stream.Inode, stream.currentPartitionId, writer,
-		stream.errCount)
+func (sw *StreamWriter) needFlush(fileOffset uint64) bool {
+	return sw.currentWriter != nil &&
+		(sw.currentWriter.fileOffset+uint64(sw.currentWriter.offset) != fileOffset ||
+			sw.currentWriter.isFullExtent())
 }
 
-func (stream *StreamWriter) needFlush(fileOffset uint64) bool {
-	return stream.currentWriter != nil &&
-		(stream.currentWriter.fileOffset+uint64(stream.currentWriter.offset) != fileOffset ||
-			stream.currentWriter.isFullExtent())
-}
-
-//stream init,alloc a extent ,select dp and extent
-func (stream *StreamWriter) init(fileOffset uint64) (err error) {
-	if stream.needFlush(fileOffset) {
-		//log.LogDebugf("init needFlush: fileOffset(%v) currentWriter.fileOffset(%v) currentWriter.offset(%v)", fileOffset, stream.currentWriter.fileOffset, stream.currentWriter.offset)
-		if err = stream.flushCurrExtentWriter(true); err != nil {
+//writer init,alloc a extent ,select dp and extent
+func (sw *StreamWriter) init(fileOffset uint64) (err error) {
+	if sw.needFlush(fileOffset) {
+		if err = sw.flushCurrExtentWriter(true); err != nil {
 			return errors.Annotatef(err, "WriteInit")
 		}
 	}
 
-	if stream.currentWriter != nil {
+	if sw.currentWriter != nil {
 		return
 	}
 	var writer *ExtentWriter
-	writer, err = stream.allocateNewExtentWriter(fileOffset)
+	writer, err = sw.allocateNewExtentWriter(fileOffset)
 	if err != nil {
 		err = errors.Annotatef(err, "WriteInit AllocNewExtentFailed")
 		return err
 	}
 
-	stream.setCurrentWriter(writer)
+	sw.setCurrentWriter(writer)
 	return
 }
 
-func (stream *StreamWriter) server() {
+func (sw *StreamWriter) server() {
 	t := time.NewTicker(time.Second * 5)
 	defer t.Stop()
 	for {
 		select {
-		case request := <-stream.requestCh:
-			stream.handleRequest(request)
-		case <-stream.exitCh:
-			stream.flushCurrExtentWriter(true)
+		case request := <-sw.requestCh:
+			sw.handleRequest(request)
+		case <-sw.exitCh:
+			sw.flushCurrExtentWriter(true)
 			return
 		case <-t.C:
-			atomic.StoreUint64(&stream.hasUpdateToMetaNodeSize, uint64(stream.updateToMetaNodeSize()))
-			log.LogDebugf("inode(%v) update to metanode filesize To(%v) user has Write to (%v)",
-				stream.Inode, stream.getHasUpdateToMetaNodeSize(), stream.extents.Size())
-			if stream.getCurrentWriter() == nil {
+			atomic.StoreUint64(&sw.hasUpdateToMetaNodeSize, uint64(sw.updateToMetaNodeSize()))
+			filesize, gen := sw.stream.extents.Size()
+			log.LogDebugf("inode(%v) update to metanode filesize To(%v) user has Write to (%v) gen(%v)", sw.Inode, sw.getHasUpdateToMetaNodeSize(), filesize, gen)
+			if sw.getCurrentWriter() == nil {
 				continue
 			}
-			stream.flushCurrExtentWriter(false)
+			sw.flushCurrExtentWriter(false)
 		}
 	}
 }
 
-func (stream *StreamWriter) handleRequest(request interface{}) {
+func (sw *StreamWriter) handleRequest(request interface{}) {
 	switch request := request.(type) {
 	case *WriteRequest:
-		request.canWrite, request.err = stream.write(request.data, request.kernelOffset, request.size)
+		request.canWrite, request.err = sw.write(request.data, request.kernelOffset, request.size)
 		request.done <- struct{}{}
 	case *FlushRequest:
-		request.err = stream.flushCurrExtentWriter(false)
+		request.err = sw.flushCurrExtentWriter(false)
 		request.done <- struct{}{}
 	case *CloseRequest:
-		request.err = stream.flushCurrExtentWriter(true)
+		request.err = sw.flushCurrExtentWriter(true)
 		if request.err == nil {
-			request.err = stream.close()
+			request.err = sw.close()
 		}
 		request.done <- struct{}{}
-		stream.exit()
+		sw.exit()
 	default:
 	}
 }
 
-func (stream *StreamWriter) write(data []byte, offset, size int) (total int, err error) {
-	log.LogDebugf("stream write: ino(%v) offset(%v) size(%v)", stream.Inode, offset, size)
+func (sw *StreamWriter) write(data []byte, offset, size int) (total int, err error) {
+	log.LogDebugf("StreamWriter write: ino(%v) offset(%v) size(%v)", sw.Inode, offset, size)
 
-	requests := stream.extents.PrepareRequest(offset, size, data)
-	log.LogDebugf("stream write: prepared requests(%v)", requests)
+	requests := sw.stream.extents.PrepareRequest(offset, size, data)
+	log.LogDebugf("StreamWriter write: prepared requests(%v)", requests)
 	for _, req := range requests {
 		var writeSize int
 		if req.ExtentKey != nil {
-			writeSize, err = stream.doRewrite(req)
+			writeSize, err = sw.doRewrite(req)
 		} else {
-			writeSize, err = stream.doWrite(req.Data, req.FileOffset, req.Size)
+			writeSize, err = sw.doWrite(req.Data, req.FileOffset, req.Size)
 		}
 		if err != nil {
-			log.LogErrorf("stream write: err(%v)", err)
+			log.LogErrorf("StreamWriter write: err(%v)", err)
 			break
 		}
 		total += writeSize
 	}
-	if offset+total > int(stream.extents.Size()) {
-		stream.extents.SetSize(uint64(offset + total))
+	if filesize, _ := sw.stream.extents.Size(); offset+total > filesize {
+		sw.stream.extents.SetSize(uint64(offset + total))
 	}
-	log.LogDebugf("stream write: done total(%v) err(%v)", total, err)
+	log.LogDebugf("StreamWriter write: done total(%v) err(%v)", total, err)
 	return
 }
 
-func (stream *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error) {
+func (sw *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error) {
 	var dp *wrapper.DataPartition
 	offset := req.FileOffset
 	size := req.Size
@@ -259,7 +269,7 @@ func (stream *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error)
 	return
 }
 
-func (stream *StreamWriter) doWrite(data []byte, offset, size int) (total int, err error) {
+func (sw *StreamWriter) doWrite(data []byte, offset, size int) (total int, err error) {
 	var (
 		write int
 	)
@@ -269,71 +279,71 @@ func (stream *StreamWriter) doWrite(data []byte, offset, size int) (total int, e
 			return
 		}
 		err = errors.Annotatef(err, "UserRequest{inode(%v) write "+
-			"KernelOffset(%v) KernelSize(%v) hasWrite(%v)}  stream{ (%v) occous error}",
-			stream.Inode, offset, size, total, stream)
+			"KernelOffset(%v) KernelSize(%v) hasWrite(%v)}  StreamWriter{ (%v) occous error}",
+			sw.Inode, offset, size, total, sw)
 		log.LogError(err.Error())
 		log.LogError(errors.ErrorStack(err))
 	}()
 
 	var initRetry int = 0
 	for total < size {
-		if err = stream.init(uint64(offset + total)); err != nil {
+		if err = sw.init(uint64(offset + total)); err != nil {
 			if initRetry++; initRetry > MaxStreamInitRetry {
 				return total, err
 			}
 			continue
 		}
-		write, err = stream.currentWriter.write(data[total:size], offset, size-total)
+		write, err = sw.currentWriter.write(data[total:size], offset, size-total)
 		if err == nil {
 			write = size - total
 			total += write
-			stream.currentWriter.offset += write
+			sw.currentWriter.offset += write
 			continue
 		}
 		if strings.Contains(err.Error(), FullExtentErr.Error()) {
 			continue
 		}
-		if err = stream.recoverExtent(); err != nil {
+		if err = sw.recoverExtent(); err != nil {
 			return
 		} else {
 			write = size - total //recover success ,then write is allLength
 		}
 		total += write
-		stream.currentWriter.offset += write
+		sw.currentWriter.offset += write
 	}
 
-	if stream.currentWriter != nil {
-		ek := stream.currentWriter.toKey()
+	if sw.currentWriter != nil {
+		ek := sw.currentWriter.toKey()
 		ek.Size += uint32(total)
-		stream.extents.Append(&ek)
+		sw.stream.extents.Append(&ek, false)
 	}
 
 	return total, err
 }
 
-func (stream *StreamWriter) close() (err error) {
-	if stream.currentWriter != nil {
-		err = stream.currentWriter.close()
+func (sw *StreamWriter) close() (err error) {
+	if sw.currentWriter != nil {
+		err = sw.currentWriter.close()
 	}
 	return
 }
 
-func (stream *StreamWriter) flushCurrExtentWriter(close bool) (err error) {
+func (sw *StreamWriter) flushCurrExtentWriter(close bool) (err error) {
 	var status error
 	defer func() {
 		if err == nil || status == syscall.ENOENT {
-			stream.errCount = 0
+			sw.errCount = 0
 			err = nil
 			return
 		}
-		stream.errCount++
-		if stream.errCount < MaxSelectDataPartionForWrite {
-			if err = stream.recoverExtent(); err == nil {
-				err = stream.flushCurrExtentWriter(false)
+		sw.errCount++
+		if sw.errCount < MaxSelectDataPartionForWrite {
+			if err = sw.recoverExtent(); err == nil {
+				err = sw.flushCurrExtentWriter(false)
 			}
 		}
 	}()
-	writer := stream.getCurrentWriter()
+	writer := sw.getCurrentWriter()
 	if writer == nil {
 		err = nil
 		return nil
@@ -342,47 +352,47 @@ func (stream *StreamWriter) flushCurrExtentWriter(close bool) (err error) {
 		err = errors.Annotatef(err, "writer(%v) Flush Failed", writer)
 		return err
 	}
-	if err = stream.updateToMetaNode(); err != nil {
+	if err = sw.updateToMetaNode(); err != nil {
 		err = errors.Annotatef(err, "update to MetaNode failed(%v)", err.Error())
 		return err
 	}
 	if close || writer.isFullExtent() {
 		writer.close()
 		writer.getConnect().Close()
-		if err = stream.updateToMetaNode(); err != nil {
+		if err = sw.updateToMetaNode(); err != nil {
 			err = errors.Annotatef(err, "update to MetaNode failed(%v)", err.Error())
 			return err
 		}
-		stream.setCurrentWriter(nil)
+		sw.setCurrentWriter(nil)
 	}
 
 	return err
 }
 
-func (stream *StreamWriter) updateToMetaNodeSize() (sumSize int) {
-	return int(stream.hasUpdateToMetaNodeSize)
+func (sw *StreamWriter) updateToMetaNodeSize() (sumSize int) {
+	return int(sw.hasUpdateToMetaNodeSize)
 }
 
-func (stream *StreamWriter) setCurrentWriter(writer *ExtentWriter) {
-	stream.currentWriter = writer
+func (sw *StreamWriter) setCurrentWriter(writer *ExtentWriter) {
+	sw.currentWriter = writer
 }
 
-func (stream *StreamWriter) getCurrentWriter() *ExtentWriter {
-	return stream.currentWriter
+func (sw *StreamWriter) getCurrentWriter() *ExtentWriter {
+	return sw.currentWriter
 }
 
-func (stream *StreamWriter) updateToMetaNode() (err error) {
+func (sw *StreamWriter) updateToMetaNode() (err error) {
 	for i := 0; i < MaxSelectDataPartionForWrite; i++ {
-		if stream.currentWriter == nil {
+		if sw.currentWriter == nil {
 			return
 		}
-		ek := stream.currentWriter.toKey() //first get currentExtent Key
+		ek := sw.currentWriter.toKey() //first get currentExtent Key
 		if ek.Size == 0 {
 			return
 		}
 
 		updateKey := ek.GetExtentKey()
-		lastUpdateExtentKeySize, ok := stream.hasUpdateKey[updateKey]
+		lastUpdateExtentKeySize, ok := sw.hasUpdateKey[updateKey]
 		if ok && lastUpdateExtentKeySize == int(ek.Size) {
 			return nil
 		}
@@ -394,61 +404,61 @@ func (stream *StreamWriter) updateToMetaNode() (err error) {
 			return nil
 		}
 		ekey := ek
-		stream.extents.Append(&ekey)
-		err = stream.client.appendExtentKey(stream.Inode, ek) //put it to metanode
+		sw.stream.extents.Append(&ekey, true)
+		err = sw.stream.client.appendExtentKey(sw.Inode, ek) //put it to metanode
 		if err == syscall.ENOENT {
-			stream.exit()
+			sw.exit()
 			return
 		}
 		if err != nil {
 			err = errors.Annotatef(err, "update extent(%v) to MetaNode Failed", ek.Size)
-			log.LogErrorf("stream(%v) err(%v)", stream, err)
+			log.LogErrorf("StreamWriter(%v) err(%v)", sw, err)
 			continue
 		}
-		stream.addHasUpdateToMetaNodeSize(int(ek.Size) - lastUpdateSize)
-		stream.hasUpdateKey[updateKey] = int(ek.Size)
+		sw.addHasUpdateToMetaNodeSize(int(ek.Size) - lastUpdateSize)
+		sw.hasUpdateKey[updateKey] = int(ek.Size)
 		return
 	}
 
 	return err
 }
 
-func (stream *StreamWriter) writeRecoverPackets(writer *ExtentWriter, retryPackets []*Packet) (err error) {
+func (sw *StreamWriter) writeRecoverPackets(writer *ExtentWriter, retryPackets []*Packet) (err error) {
 	for _, p := range retryPackets {
 		log.LogInfof("recover packet (%v) kernelOffset(%v) to extent(%v)",
 			p.GetUniqueLogId(), p.kernelOffset, writer)
 		_, err = writer.write(p.Data, p.kernelOffset, int(p.Size))
 		if err != nil {
 			err = errors.Annotatef(err, "pkg(%v) RecoverExtent write failed", p.GetUniqueLogId())
-			log.LogErrorf("stream(%v) err(%v)", stream.toStringWithWriter(writer), err.Error())
-			stream.excludePartition = append(stream.excludePartition, writer.dp.PartitionID)
+			log.LogErrorf("StreamWriter(%v) err(%v)", sw.toStringWithWriter(writer), err.Error())
+			sw.excludePartition = append(sw.excludePartition, writer.dp.PartitionID)
 			return err
 		}
 	}
 	return
 }
 
-func (stream *StreamWriter) recoverExtent() (err error) {
-	stream.excludePartition = append(stream.excludePartition, stream.currentWriter.dp.PartitionID) //exclude current PartionId
-	stream.currentWriter.notifyExit()
-	retryPackets := stream.currentWriter.getNeedRetrySendPackets() //get need retry recover packets
+func (sw *StreamWriter) recoverExtent() (err error) {
+	sw.excludePartition = append(sw.excludePartition, sw.currentWriter.dp.PartitionID) //exclude current PartionId
+	sw.currentWriter.notifyExit()
+	retryPackets := sw.currentWriter.getNeedRetrySendPackets() //get need retry recover packets
 	for i := 0; i < MaxSelectDataPartionForWrite; i++ {
-		if err = stream.updateToMetaNode(); err == nil {
+		if err = sw.updateToMetaNode(); err == nil {
 			break
 		}
 	}
 	var writer *ExtentWriter
 	for i := 0; i < MaxSelectDataPartionForWrite; i++ {
 		err = nil
-		if writer, err = stream.allocateNewExtentWriter(uint64(retryPackets[0].kernelOffset)); err != nil { //allocate new extent
+		if writer, err = sw.allocateNewExtentWriter(uint64(retryPackets[0].kernelOffset)); err != nil { //allocate new extent
 			err = errors.Annotatef(err, "RecoverExtent Failed")
-			log.LogErrorf("stream(%v) err(%v)", stream, err)
+			log.LogErrorf("writer(%v) err(%v)", writer, err)
 			continue
 		}
-		if err = stream.writeRecoverPackets(writer, retryPackets); err == nil {
-			stream.excludePartition = make([]uint32, 0)
-			stream.setCurrentWriter(writer)
-			stream.updateToMetaNode()
+		if err = sw.writeRecoverPackets(writer, retryPackets); err == nil {
+			sw.excludePartition = make([]uint32, 0)
+			sw.setCurrentWriter(writer)
+			sw.updateToMetaNode()
 			return err
 		} else {
 			writer.forbirdUpdateToMetanode()
@@ -460,26 +470,26 @@ func (stream *StreamWriter) recoverExtent() (err error) {
 
 }
 
-func (stream *StreamWriter) allocateNewExtentWriter(fileOffset uint64) (writer *ExtentWriter, err error) {
+func (sw *StreamWriter) allocateNewExtentWriter(fileOffset uint64) (writer *ExtentWriter, err error) {
 	var (
 		dp       *wrapper.DataPartition
 		extentId uint64
 	)
 	err = fmt.Errorf("cannot alloct new extent after maxrery")
 	for i := 0; i < MaxSelectDataPartionForWrite; i++ {
-		if dp, err = gDataWrapper.GetWriteDataPartition(stream.excludePartition); err != nil {
-			log.LogWarn(fmt.Sprintf("stream (%v) ActionAllocNewExtentWriter "+
-				"failed on getWriteDataPartion,error(%v) execludeDataPartion(%v)", stream, err, stream.excludePartition))
+		if dp, err = gDataWrapper.GetWriteDataPartition(sw.excludePartition); err != nil {
+			log.LogWarn(fmt.Sprintf("StreamWriter(%v) ActionAllocNewExtentWriter "+
+				"failed on getWriteDataPartion,error(%v) execludeDataPartion(%v)", sw, err, sw.excludePartition))
 			continue
 		}
-		if extentId, err = stream.createExtent(dp); err != nil {
-			log.LogWarn(fmt.Sprintf("stream (%v)ActionAllocNewExtentWriter "+
-				"create Extent,error(%v) execludeDataPartion(%v)", stream, err, stream.excludePartition))
+		if extentId, err = sw.createExtent(dp); err != nil {
+			log.LogWarn(fmt.Sprintf("StreamWriter(%v)ActionAllocNewExtentWriter "+
+				"create Extent,error(%v) execludeDataPartion(%v)", sw, err, sw.excludePartition))
 			continue
 		}
-		if writer, err = NewExtentWriter(stream.Inode, dp, extentId, fileOffset); err != nil {
-			log.LogWarn(fmt.Sprintf("stream (%v) ActionAllocNewExtentWriter "+
-				"NewExtentWriter(%v),error(%v) execludeDataPartion(%v)", stream, extentId, err, stream.excludePartition))
+		if writer, err = NewExtentWriter(sw.Inode, dp, extentId, fileOffset); err != nil {
+			log.LogWarn(fmt.Sprintf("StreamWriter(%v) ActionAllocNewExtentWriter "+
+				"NewExtentWriter(%v),error(%v) execludeDataPartion(%v)", sw, extentId, err, sw.excludePartition))
 			continue
 		}
 		break
@@ -488,14 +498,14 @@ func (stream *StreamWriter) allocateNewExtentWriter(fileOffset uint64) (writer *
 		log.LogErrorf(errors.Annotatef(err, "allocateNewExtentWriter").Error())
 		return nil, errors.Annotatef(err, "allocateNewExtentWriter")
 	}
-	stream.currentPartitionId = dp.PartitionID
-	stream.currentExtentId = extentId
+	sw.currentPartitionId = dp.PartitionID
+	sw.currentExtentId = extentId
 	err = nil
 
 	return writer, nil
 }
 
-func (stream *StreamWriter) createExtent(dp *wrapper.DataPartition) (extentId uint64, err error) {
+func (sw *StreamWriter) createExtent(dp *wrapper.DataPartition) (extentId uint64, err error) {
 	var (
 		connect *net.TCPConn
 	)
@@ -508,7 +518,7 @@ func (stream *StreamWriter) createExtent(dp *wrapper.DataPartition) (extentId ui
 	connect.SetKeepAlive(true)
 	connect.SetNoDelay(true)
 	defer connect.Close()
-	p := NewCreateExtentPacket(dp, stream.Inode)
+	p := NewCreateExtentPacket(dp, sw.Inode)
 	if err = p.WriteToConn(connect); err != nil {
 		err = errors.Annotatef(err, "send CreateExtent(%v) to datapartionHosts(%v)", p.GetUniqueLogId(), dp.Hosts[0])
 		return
@@ -532,17 +542,17 @@ func (stream *StreamWriter) createExtent(dp *wrapper.DataPartition) (extentId ui
 	return extentId, nil
 }
 
-func (stream *StreamWriter) exit() {
+func (sw *StreamWriter) exit() {
 	select {
-	case stream.exitCh <- true:
+	case sw.exitCh <- true:
 	default:
 	}
 }
 
-func (stream *StreamWriter) addHasUpdateToMetaNodeSize(writed int) {
-	atomic.AddUint64(&stream.hasUpdateToMetaNodeSize, uint64(writed))
+func (sw *StreamWriter) addHasUpdateToMetaNodeSize(writed int) {
+	atomic.AddUint64(&sw.hasUpdateToMetaNodeSize, uint64(writed))
 }
 
-func (stream *StreamWriter) getHasUpdateToMetaNodeSize() uint64 {
-	return atomic.LoadUint64(&stream.hasUpdateToMetaNodeSize)
+func (sw *StreamWriter) getHasUpdateToMetaNodeSize() uint64 {
+	return atomic.LoadUint64(&sw.hasUpdateToMetaNodeSize)
 }

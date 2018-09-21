@@ -23,15 +23,13 @@ import (
 	"golang.org/x/net/context"
 
 	"github.com/tiglabs/containerfs/proto"
-	"github.com/tiglabs/containerfs/sdk/data/stream"
 	"github.com/tiglabs/containerfs/util/log"
 	"sync"
 )
 
 type File struct {
-	super  *Super
-	inode  *Inode
-	stream *stream.StreamReader
+	super *Super
+	inode *Inode
 	sync.RWMutex
 }
 
@@ -54,18 +52,6 @@ var (
 	_ fs.NodeRemovexattrer = (*File)(nil)
 )
 
-func (f *File) getReadStream() (r *stream.StreamReader) {
-	f.RLock()
-	defer f.RUnlock()
-	return f.stream
-}
-
-func (f *File) setReadStream(stream *stream.StreamReader) {
-	f.Lock()
-	defer f.Unlock()
-	f.stream = stream
-}
-
 func NewFile(s *Super, i *Inode) *File {
 	return &File{super: s, inode: i}
 }
@@ -79,8 +65,8 @@ func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
 	}
 
 	inode.fillAttr(a)
-	if fileSize := f.super.ec.GetFileSize(ino); fileSize > a.Size {
-		a.Size = fileSize
+	if fileSize, gen := f.super.ec.GetFileSize(ino); gen >= inode.gen {
+		a.Size = uint64(fileSize)
 	}
 
 	log.LogDebugf("TRACE Attr: inode(%v) attr(%v)", inode, a)
@@ -92,9 +78,13 @@ func (f *File) Forget() {
 	if !f.super.orphan.Evict(ino) {
 		return
 	}
+
+	if err := f.super.ec.CloseStream(ino); err != nil {
+		log.LogErrorf("Forget CloseStreamer: ino(%v) err(%v)", ino, err)
+	}
+
 	if err := f.super.mw.Evict(ino); err != nil {
-		log.LogErrorf("Forget: ino(%v) err(%v)", ino, err)
-		//TODO: push back to evicted list, and deal with it later
+		log.LogErrorf("Forget Evict: ino(%v) err(%v)", ino, err)
 	}
 	log.LogDebugf("TRACE Forget: ino(%v)", ino)
 }
@@ -109,7 +99,7 @@ func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 		return nil, ParseError(err)
 	}
 
-	err = f.super.ec.OpenForWrite(ino)
+	err = f.super.ec.OpenStream(ino)
 	if err != nil {
 		return nil, fuse.EIO
 	}
@@ -129,7 +119,7 @@ func (f *File) Release(ctx context.Context, req *fuse.ReleaseRequest) (err error
 		return fuse.EIO
 	}
 
-	err = f.super.ec.CloseForWrite(ino)
+	err = f.super.ec.CloseStream(ino)
 	if err != nil {
 		log.LogErrorf("Release: close writer failed, ino(%v) req(%v) err(%v)", ino, req, err)
 		return fuse.EIO
@@ -142,16 +132,8 @@ func (f *File) Release(ctx context.Context, req *fuse.ReleaseRequest) (err error
 }
 
 func (f *File) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) (err error) {
-	if f.getReadStream() == nil {
-		stream, err := f.super.ec.OpenForRead(f.inode.ino)
-		if err != nil {
-			log.LogErrorf("Open for Read: ino(%v) err(%v)", f.inode.ino, err)
-			return fuse.EPERM
-		}
-		f.setReadStream(stream)
-	}
 	start := time.Now()
-	size, err := f.super.ec.Read(f.getReadStream(), f.inode.ino, resp.Data[fuse.OutHeaderSize:], int(req.Offset), req.Size)
+	size, err := f.super.ec.Read(f.inode.ino, resp.Data[fuse.OutHeaderSize:], int(req.Offset), req.Size)
 	if err != nil && err != io.EOF {
 		log.LogErrorf("Read: ino(%v) req(%v) err(%v) size(%v)", f.inode.ino, req, err, size)
 		return fuse.EIO

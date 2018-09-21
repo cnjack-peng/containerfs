@@ -82,7 +82,7 @@ func (d *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.Cr
 	inode := NewInode(info)
 	d.super.ic.Put(inode)
 	child := NewFile(d.super, inode)
-	err = d.super.ec.OpenForWrite(inode.ino)
+	err = d.super.ec.OpenStream(inode.ino)
 	if err != nil {
 		return nil, nil, fuse.EIO
 	}

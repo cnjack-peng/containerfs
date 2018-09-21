@@ -72,7 +72,7 @@ func (cache *ExtentCache) update(gen, size uint64, eks []proto.ExtentKey) {
 	}
 }
 
-func (cache *ExtentCache) Append(ek *proto.ExtentKey) {
+func (cache *ExtentCache) Append(ek *proto.ExtentKey, sync bool) {
 	ekEnd := ek.FileOffset + uint64(ek.Size)
 	lower := &proto.ExtentKey{FileOffset: ek.FileOffset}
 	upper := &proto.ExtentKey{FileOffset: ekEnd}
@@ -92,6 +92,9 @@ func (cache *ExtentCache) Append(ek *proto.ExtentKey) {
 	}
 
 	cache.root.ReplaceOrInsert(ek)
+	if sync {
+		cache.gen++
+	}
 	if ekEnd > cache.size {
 		cache.size = ekEnd
 	}
@@ -104,10 +107,10 @@ func (cache *ExtentCache) Max() *proto.ExtentKey {
 	return ek
 }
 
-func (cache *ExtentCache) Size() uint64 {
+func (cache *ExtentCache) Size() (size int, gen uint64) {
 	cache.RLock()
 	defer cache.RUnlock()
-	return cache.size
+	return int(cache.size), cache.gen
 }
 
 func (cache *ExtentCache) SetSize(size uint64) {
