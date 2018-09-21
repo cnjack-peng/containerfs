@@ -72,10 +72,7 @@ func (stream *StreamReader) GetExtentReader(ek *proto.ExtentKey) (*ExtentReader,
 	if err != nil {
 		return nil, err
 	}
-	reader := new(ExtentReader)
-	reader.inode = stream.inode
-	reader.key = ek
-	reader.dp = partition
+	reader := NewExtentReader(stream.inode, ek, partition)
 	return reader, nil
 }
 

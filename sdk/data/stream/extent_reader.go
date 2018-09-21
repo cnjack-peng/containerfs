@@ -31,6 +31,14 @@ type ExtentReader struct {
 	dp    *wrapper.DataPartition
 }
 
+func NewExtentReader(inode uint64, key *proto.ExtentKey, dp *wrapper.DataPartition) *ExtentReader {
+	return &ExtentReader{
+		inode: inode,
+		key:   key,
+		dp:    dp,
+	}
+}
+
 func (reader *ExtentReader) String() (m string) {
 	return fmt.Sprintf("inode (%v) extentKey(%v)", reader.inode,
 		reader.key.Marshal())
