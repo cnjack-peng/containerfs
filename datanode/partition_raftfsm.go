@@ -34,10 +34,7 @@ func (dp *dataPartition) Apply(command []byte, index uint64) (resp interface{}, 
 		dp.uploadApplyID(index)
 		if err != nil {
 			resp = proto.OpExistErr
-//			dp.raftC <- opStopRaft
-
-			//TODO: start extent repair
-//			dp.repairC <- opItem
+			dp.repairC <- opItem.extentId
 		} else {
 			resp = proto.OpOk
 		}

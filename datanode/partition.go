@@ -82,6 +82,7 @@ type DataPartition interface {
 
 	FlushDelete() error
 	StartRaft() (err error)
+	StartSchedule()
 	RandomWriteSubmit(pkg *Packet) (err error)
 	RandomPartitionReadCheck(request *Packet, connect net.Conn) (err error)
 	LoadApplyIndex() (err error)
@@ -143,7 +144,7 @@ type dataPartition struct {
 	config          *dataPartitionCfg
 	applyId         uint64
 	raftC           chan uint32
-	repairC         chan *rndWrtOpItem
+	repairC         chan uint64
 	storeC          chan uint64
 	stopC           chan bool
 
@@ -161,6 +162,8 @@ func CreateDataPartition(dpCfg *dataPartitionCfg, disk *Disk) (dp DataPartition,
 		if err = dp.StartRaft(); err != nil {
 			return
 		}
+
+		go dp.StartSchedule()
 	}
 
 	// Store meta information into meta file.
@@ -207,6 +210,8 @@ func LoadDataPartition(partitionDir string, disk *Disk) (dp DataPartition, err e
 		if err = dp.StartRaft(); err != nil {
 			return
 		}
+
+		go dp.StartSchedule()
 	}
 	return
 }
@@ -599,7 +604,7 @@ func (dp *dataPartition) MergeRepair(metas *MembersFileMetas) {
 			continue
 		}
 		wg.Add(1)
-		go dp.doStreamExtentFixRepair(&wg, fixExtent)
+		go dp.doStreamExtentFixRepair(&wg, fixExtent, metas.TaskType)
 	}
 	for chunkId, deleteTinyObject := range metas.NeedDeleteObjectsTasks {
 		if err := dp.DelObjects(uint32(chunkId), deleteTinyObject); err != nil {

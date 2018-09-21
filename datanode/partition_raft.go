@@ -21,6 +21,7 @@ import (
 	"github.com/tiglabs/containerfs/util/config"
 	"github.com/tiglabs/containerfs/util/log"
 	raftproto "github.com/tiglabs/raft/proto"
+	"github.com/tiglabs/containerfs/storage"
 	"os"
 	"strconv"
 	"strings"
@@ -109,10 +110,9 @@ func (dp *dataPartition) stopRaft() {
 	return
 }
 
-func (dp *dataPartition) startSchedule() {
-	var isRunning bool = false
-	timer := time.NewTimer(time.Hour)
-	timer.Stop()
+func (dp *dataPartition) StartSchedule() {
+	var isRunning bool
+	timer := time.NewTimer(time.Minute)
 
 	dumpFunc := func(applyIndex uint64) {
 		log.LogDebugf("[startSchedule] partitionId=%d: applyID=%d", dp.config.PartitionId, applyIndex)
@@ -147,18 +147,16 @@ func (dp *dataPartition) startSchedule() {
 				indexes = nil
 			case applyIndex := <-dp.storeC:
 				indexes = append(indexes, applyIndex)
-			case opRaft := <-dp.raftC:
-				switch opRaft {
-				case opStartRaft:
-					if dp.raftPartition == nil {
-						if err := dp.StartRaft(); err != nil {
-							panic("start raft error")
-						}
+
+			case opRaftCode := <-dp.raftC:
+				if dp.raftPartition == nil && opRaftCode == opStartRaft{
+					if err := dp.StartRaft(); err != nil {
+						panic("start raft error")
 					}
-				case opStopRaft:
-					dp.stopRaft()
 				}
-				case <-dp.repairC:
+
+			case extentId := <-dp.repairC:
+				dp.ApplyErrRepair(extentId)
 
 			case <-timer.C:
 				// Truncate raft log
@@ -338,3 +336,50 @@ func (s *DataNode) stopRaftServer() {
 	}
 }
 
+func (dp *dataPartition) ExtentRepair(extentFile *storage.FileInfo) {
+	startTime := time.Now().UnixNano()
+	log.LogInfof("action[ExtentRepair] partition[%v] start.", dp.partitionId)
+
+	mf := NewMemberFileMetas()
+
+	addFile := &storage.FileInfo{Source: extentFile.Source, FileId: extentFile.FileId, Size: extentFile.Size, Inode: extentFile.Inode}
+	mf.NeedAddExtentsTasks = append(mf.NeedAddExtentsTasks, addFile)
+	log.LogInfof("action[generatorAddExtentsTasks] partition[%v] addFile[%v].", dp.partitionId, addFile)
+
+	dp.MergeRepair(mf)
+
+	finishTime := time.Now().UnixNano()
+	log.LogInfof("action[fileRepair] partition[%v] finish cost[%vms].",
+		dp.partitionId, (finishTime-startTime)/int64(time.Millisecond))
+}
+
+func (dp *dataPartition) ApplyErrRepair (extentId uint64) {
+	leaderAddr, isLeader := dp.IsLeader()
+	dp.stopRaft()
+	extentInfo, err := dp.extentStore.GetOneWatermark(extentId, storage.GetStableExtentFilter())
+	if err != nil {
+		err = errors.Annotatef(err, "getAllMemberFileMetas extent dataPartition[%v] GetAllWaterMark", dp.partitionId)
+		return
+	}
+
+	if isLeader {
+		// If leader apply error, notify all follower to start repair
+		memberMetas := NewMemberFileMetas()
+		memberMetas.files[extentInfo.FileId] = extentInfo
+		addFile := &storage.FileInfo{Source: leaderAddr, FileId: extentInfo.FileId, Size: extentInfo.Size, Inode: extentInfo.Inode}
+		memberMetas.NeedAddExtentsTasks = append(memberMetas.NeedAddExtentsTasks, addFile)
+		memberMetas.TaskType = FixRaftFollower
+		dp.NotifyRaftFollowerRepair(memberMetas)
+		log.LogInfof("action[RepairRaftFollowerExtent] partition[%v] addFile[%v].", dp.partitionId, addFile)
+
+	} else if leaderAddr != "" {
+		// If follower apply error, delete local extent and repair from leader
+		dp.extentStore.DeleteDirtyExtent(extentId)
+		log.LogWarnf("[ExtentRepair] Delete dirty extent [%v_%v]", dp.partitionId, extentId)
+
+		// Repair local extent
+		extentInfo.Source = leaderAddr
+		dp.ExtentRepair(extentInfo)
+		dp.raftC <- opStartRaft
+	}
+}

@@ -25,10 +25,12 @@ import (
 	"github.com/tiglabs/containerfs/proto"
 	"github.com/tiglabs/containerfs/storage"
 	"github.com/tiglabs/containerfs/util/log"
+	"strings"
 )
 
 //every  datapartion  file metas used for auto repairt
 type MembersFileMetas struct {
+	TaskType               uint8                     //which type task
 	Index                  int                       //index on data partionGroup
 	files                  map[int]*storage.FileInfo //storage file on datapartiondisk meta
 	NeedDeleteExtentsTasks []*storage.FileInfo       //generator delete extent file task
@@ -337,6 +339,52 @@ func (dp *dataPartition) NotifyRepair(members []*MembersFileMetas) (err error) {
 				return
 			}
 			p.Data, err = json.Marshal(members[index])
+			p.Size = uint32(len(p.Data))
+			err = p.WriteToConn(conn)
+			if err != nil {
+				gConnPool.Put(conn, true)
+				errList = append(errList, err)
+				return
+			}
+			p.ReadFromConn(conn, proto.NoReadDeadlineTime)
+			gConnPool.Put(conn, true)
+		}(i)
+	}
+	wg.Wait()
+	if len(errList) > 0 {
+		for _, errItem := range errList {
+			err = errors.Annotate(err, errItem.Error())
+		}
+	}
+	return
+}
+
+/*notify follower to repair dataPartition extentStore*/
+func (dp *dataPartition) NotifyRaftFollowerRepair(members *MembersFileMetas) (err error) {
+	var (
+		errList []error
+	)
+	errList = make([]error, 0)
+	var wg sync.WaitGroup
+
+	for i := 0; i < len(dp.replicaHosts); i++ {
+		replicaAddr := dp.replicaHosts[i]
+		replicaAddrParts := strings.Split(replicaAddr, ":")
+		if strings.TrimSpace(replicaAddrParts[0]) == LocalIP {
+			continue  //local is leader not need send notify repair
+		}
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			p := NewNotifyRepair(dp.partitionId)
+			var conn *net.TCPConn
+			target := dp.replicaHosts[index]
+			conn, err = gConnPool.Get(target)
+			if err != nil {
+				errList = append(errList, err)
+				return
+			}
+			p.Data, err = json.Marshal(members)
 			p.Size = uint32(len(p.Data))
 			err = p.WriteToConn(conn)
 			if err != nil {

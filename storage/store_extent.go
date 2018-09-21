@@ -566,3 +566,52 @@ func (s *ExtentStore) GetDelObjects() (extents []uint64) {
 	}
 	return
 }
+
+func (s *ExtentStore) GetOneWatermark(extendId uint64, filter ExtentFilter) (extentInfo *FileInfo, err error) {
+	s.extentInfoMux.RLock()
+	extentInfo, has := s.extentInfoMap[extendId]
+	s.extentInfoMux.RUnlock()
+	if !has{
+		err = fmt.Errorf("extent not exist")
+		return nil, err
+	}
+	if filter != nil && !filter(extentInfo) {
+		err = fmt.Errorf("extent filter")
+		return nil, err
+	}
+
+	return
+}
+
+func (s *ExtentStore) DeleteDirtyExtent(extentId uint64) (err error) {
+	var (
+		extent     Extent
+		extentInfo *FileInfo
+		has        bool
+	)
+
+	s.extentInfoMux.RLock()
+	extentInfo, has = s.extentInfoMap[extentId]
+	s.extentInfoMux.RUnlock()
+	if !has {
+		return nil
+	}
+
+	if extent, err = s.getExtent(extentId); err != nil {
+		return nil
+	}
+
+	extentInfo.FromExtent(extent)
+	s.cache.Del(extent.ID())
+
+	s.extentInfoMux.Lock()
+	delete(s.extentInfoMap, extentId)
+	s.extentInfoMux.Unlock()
+
+	extentFilePath := path.Join(s.dataDir, strconv.FormatUint(extentId, 10))
+	if err = os.Remove(extentFilePath); err != nil {
+		return
+	}
+
+	return
+}

@@ -104,13 +104,13 @@ const (
 
 const (
 	opRandomWrite uint32 = iota
-
 	opStartRaft
-	opStopRaft
-
-	opExtentRepair
 )
 
 const (
-	maxApplyErrRetry       = 10
+	maxApplyErrRetry = 10
+)
+
+const (
+	FixRaftFollower  = 1
 )
