@@ -24,7 +24,6 @@ import (
 	"io/ioutil"
 	"net"
 	"encoding/json"
-
 	"github.com/juju/errors"
 	"github.com/tiglabs/containerfs/proto"
 	"github.com/tiglabs/containerfs/raftstore"
@@ -32,6 +31,7 @@ import (
 	"github.com/tiglabs/containerfs/util/log"
 	raftproto "github.com/tiglabs/raft/proto"
 	"github.com/tiglabs/containerfs/storage"
+	"encoding/binary"
 )
 
 type dataPartitionCfg struct {
@@ -115,7 +115,7 @@ func (dp *dataPartition) stopRaft() {
 
 func (dp *dataPartition) StartSchedule() {
 	var isRunning bool
-	timer := time.NewTimer(time.Minute)
+	timer := time.NewTimer(time.Minute*10)
 
 	dumpFunc := func(applyIndex uint64) {
 		log.LogDebugf("[startSchedule] partitionId=%d: applyID=%d", dp.config.PartitionId, applyIndex)
@@ -152,7 +152,7 @@ func (dp *dataPartition) StartSchedule() {
 				indexes = append(indexes, applyIndex)
 
 			case opRaftCode := <-dp.raftC:
-				if dp.raftPartition == nil && opRaftCode == opStartRaft{
+				if dp.raftPartition == nil && opRaftCode == opStartRaft {
 					log.LogWarn("action[RaftOp] restart raft partition=%v", dp.partitionId)
 					if err := dp.StartRaft(); err != nil {
 						panic("start raft error")
@@ -164,9 +164,12 @@ func (dp *dataPartition) StartSchedule() {
 				dp.raftC <- opStartRaft
 
 			case <-timer.C:
-				// Truncate raft log
-				//TODO send msg get all replicates applied index. truncate the min
-				dp.raftPartition.Truncate(dp.applyId)
+				dp.getMinAppliedId()
+				if dp.minAppliedId > dp.lastTruncatId { // Has changed
+					dp.raftPartition.Truncate(dp.minAppliedId)
+					dp.lastTruncatId = dp.minAppliedId
+				}
+
 			}
 		}
 	}(dp.stopC)
@@ -288,6 +291,14 @@ func (dp *dataPartition) LoadApplyIndex() (err error) {
 	return
 }
 
+func (dp *dataPartition) SetMinAppliedId(id uint64) {
+	dp.minAppliedId = id
+}
+
+func (dp *dataPartition) GetAppliedId() (id uint64) {
+	return dp.applyId
+}
+
 //random write need start raft server
 func (s *DataNode) parseRaftConfig(cfg *config.Config) (err error) {
 	s.raftDir = cfg.GetString(ConfigKeyRaftDir)
@@ -361,7 +372,7 @@ func (dp *dataPartition) ExtentRepair(extentFiles []*storage.FileInfo) {
 		dp.partitionId, (finishTime-startTime)/int64(time.Millisecond))
 }
 
-func (dp *dataPartition) ApplyErrRepair (extentId uint64) {
+func (dp *dataPartition) ApplyErrRepair(extentId uint64) {
 	extentFiles := make([]*storage.FileInfo, 0)
 	leaderAddr, isLeader := dp.IsLeader()
 	dp.stopRaft()
@@ -435,5 +446,69 @@ func (dp *dataPartition) getFileMetas(targetAddr string) (extentFiles []*storage
 
 	gConnPool.Put(conn, true)
 
+	return
+}
+
+func NewGetAppliedId(partitionId uint32, minAppliedId uint64) (p *Packet) {
+	p = new(Packet)
+	p.Opcode = proto.OpGetAppliedId
+	p.PartitionID = partitionId
+	p.Magic = proto.ProtoMagic
+	p.ReqID = proto.GetReqID()
+	p.Data = make([]byte, 8)
+	binary.BigEndian.PutUint64(p.Data, minAppliedId)
+	return
+}
+
+// Get all files meta
+func (dp *dataPartition) getMinAppliedId() {
+	//only first host get applied
+	if strings.Split(dp.replicaHosts[0], ":")[0] != LocalIP {
+		return
+	}
+	var (
+		minAppliedId uint64
+		err          error
+	)
+	// send the last minAppliedId and get current appliedId
+	p := NewGetAppliedId(dp.partitionId, dp.minAppliedId)
+	defer func(newMinAppliedId uint64) {
+		if err == nil {
+			//success maybe update the minAppliedId
+			dp.minAppliedId = newMinAppliedId
+		} else {
+			//do nothing
+		}
+	}(minAppliedId)
+
+	minAppliedId = dp.applyId
+	for i := 1; i < len(dp.replicaHosts); i++ {
+		var conn *net.TCPConn
+		target := dp.replicaHosts[i]
+		conn, err = gConnPool.Get(target) //get remote connect
+		if err != nil {
+			err = errors.Annotatef(err, "getMinAppliedId  dp[%v] get host[%v] connect", dp.partitionId, target)
+			return
+		}
+
+		err = p.WriteToConn(conn) //write command to remote host
+		if err != nil {
+			gConnPool.Put(conn, true)
+			err = errors.Annotatef(err, "getMinAppliedId dp[%v] write to host[%v]", dp.partitionId, target)
+			return
+		}
+		err = p.ReadFromConn(conn, 60) //read it response
+		if err != nil {
+			gConnPool.Put(conn, true)
+			err = errors.Annotatef(err, "getMinAppliedId dp[%v] read from host[%v]", dp.partitionId, target)
+			return
+		}
+
+		remoteAppliedId := binary.BigEndian.Uint64(p.Data)
+		if remoteAppliedId < minAppliedId && remoteAppliedId != 0 {
+			minAppliedId = remoteAppliedId
+		}
+		gConnPool.Put(conn, true)
+	}
 	return
 }

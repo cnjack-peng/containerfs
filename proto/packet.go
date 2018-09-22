@@ -62,6 +62,7 @@ const (
 	OpNotifyCompact           uint8 = 0x0D
 	OpGetDataPartitionMetrics uint8 = 0x0E
 	OpRandomWrite             uint8 = 0x0F
+	OpGetAppliedId            uint8 = 0x10
 
 	// Operations: Client -> MetaNode.
 	OpMetaCreateInode   uint8 = 0x20
@@ -258,6 +259,8 @@ func (p *Packet) GetOpMsg() (m string) {
 		m = "OpPing"
 	case OpGetDataPartitionMetrics:
 		m = "OpGetDataPartitionMetrics"
+	case OpGetAppliedId:
+		m = "OpGetAppliedId"
 	}
 	return
 }

@@ -93,6 +93,8 @@ func (s *DataNode) operatePacket(pkg *Packet, c *net.TCPConn) {
 		s.handleHeartbeats(pkg)
 	case proto.OpGetDataPartitionMetrics:
 		s.handleGetDataPartitionMetrics(pkg)
+	case proto.OpGetAppliedId:
+		s.handleGetAppliedId(pkg)
 	default:
 		pkg.PackErrorBody(ErrorUnknownOp.Error(), ErrorUnknownOp.Error()+strconv.Itoa(int(pkg.Opcode)))
 	}
@@ -518,4 +520,20 @@ func (s *DataNode) handleGetDataPartitionMetrics(pkg *Packet) {
 	} else {
 		pkg.PackOkWithBody(data)
 	}
+}
+
+// Handle OpGetAllWatermark packet.
+func (s *DataNode) handleGetAppliedId(pkg *Packet) {
+	//update minAppliedId
+	minAppliedId := binary.BigEndian.Uint64(pkg.Data)
+	if minAppliedId > 0 {
+		pkg.DataPartition.SetMinAppliedId(minAppliedId)
+	}
+
+	//return current appliedId
+	appliedId := pkg.DataPartition.GetAppliedId()
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, appliedId)
+	pkg.PackOkWithBody(buf)
+	return
 }

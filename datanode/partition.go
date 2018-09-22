@@ -86,6 +86,8 @@ type DataPartition interface {
 	RandomWriteSubmit(pkg *Packet) (err error)
 	RandomPartitionReadCheck(request *Packet, connect net.Conn) (err error)
 	LoadApplyIndex() (err error)
+	SetMinAppliedId(id uint64)
+	GetAppliedId() (id uint64)
 
 	AddWriteMetrics(latency uint64)
 	AddReadMetrics(latency uint64)
@@ -143,6 +145,8 @@ type dataPartition struct {
 	raftPartition   raftstore.Partition
 	config          *dataPartitionCfg
 	applyId         uint64
+	lastTruncatId   uint64
+	minAppliedId    uint64
 	raftC           chan uint32
 	repairC         chan uint64
 	storeC          chan uint64
