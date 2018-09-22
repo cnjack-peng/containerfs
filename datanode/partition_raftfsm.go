@@ -15,17 +15,20 @@
 package datanode
 
 import (
+	"io"
 	"encoding/json"
 	"sync/atomic"
-
 	"encoding/binary"
 	"fmt"
+
 	"github.com/tiglabs/containerfs/proto"
 	"github.com/tiglabs/containerfs/util/log"
 	"github.com/tiglabs/containerfs/util/ump"
 	"github.com/tiglabs/raft"
 	raftproto "github.com/tiglabs/raft/proto"
-	"io"
+	"github.com/juju/errors"
+	"github.com/tiglabs/containerfs/storage"
+	"strings"
 )
 
 func (dp *dataPartition) Apply(command []byte, index uint64) (resp interface{}, err error) {
@@ -108,9 +111,10 @@ func (dp *dataPartition) Snapshot() (raftproto.Snapshot, error) {
 
 func (dp *dataPartition) ApplySnapshot(peers []raftproto.Peer, iterator raftproto.SnapIterator) (err error) {
 	var (
-		data       []byte
-		index      int
-		appIndexID uint64
+		data        []byte
+		appIndexID  uint64
+		extentFiles []*storage.FileInfo
+		targetAddr  string
 	)
 	defer func() {
 		if err == io.EOF {
@@ -121,17 +125,26 @@ func (dp *dataPartition) ApplySnapshot(peers []raftproto.Peer, iterator raftprot
 		}
 		log.LogErrorf("[ApplySnapshot]: %s", err.Error())
 	}()
-	for {
-		data, err = iterator.Next()
-		if err != nil {
-			return
-		}
-		if index == 0 {
-			appIndexID = binary.BigEndian.Uint64(data)
-			index++
-			continue
-		}
+
+	leaderAddr, _ := dp.IsLeader()
+	replicaAddrParts := strings.Split(dp.replicaHosts[0], ":")
+	if strings.TrimSpace(replicaAddrParts[0]) == LocalIP && leaderAddr != "" {
+		targetAddr = leaderAddr
+	} else {
+		targetAddr = dp.replicaHosts[0]
 	}
+
+	extentFiles, err = dp.getFileMetas(targetAddr)
+	if err != nil {
+		err = errors.Annotatef(err, "[ApplySnapshot] getFileMetas dataPartition[%v]", dp.partitionId)
+		return
+	}
+	dp.ExtentRepair(extentFiles)
+
+	data, err = iterator.Next()
+	appIndexID = binary.BigEndian.Uint64(data)
+	dp.applyId = appIndexID
+	return
 }
 
 func (dp *dataPartition) HandleFatalEvent(err *raft.FatalError) {

@@ -15,13 +15,6 @@
 package datanode
 
 import (
-	"github.com/juju/errors"
-	"github.com/tiglabs/containerfs/proto"
-	"github.com/tiglabs/containerfs/raftstore"
-	"github.com/tiglabs/containerfs/util/config"
-	"github.com/tiglabs/containerfs/util/log"
-	raftproto "github.com/tiglabs/raft/proto"
-	"github.com/tiglabs/containerfs/storage"
 	"os"
 	"strconv"
 	"strings"
@@ -29,6 +22,16 @@ import (
 	"path"
 	"fmt"
 	"io/ioutil"
+	"net"
+	"encoding/json"
+
+	"github.com/juju/errors"
+	"github.com/tiglabs/containerfs/proto"
+	"github.com/tiglabs/containerfs/raftstore"
+	"github.com/tiglabs/containerfs/util/config"
+	"github.com/tiglabs/containerfs/util/log"
+	raftproto "github.com/tiglabs/raft/proto"
+	"github.com/tiglabs/containerfs/storage"
 )
 
 type dataPartitionCfg struct {
@@ -338,15 +341,18 @@ func (s *DataNode) stopRaftServer() {
 	}
 }
 
-func (dp *dataPartition) ExtentRepair(extentFile *storage.FileInfo) {
+func (dp *dataPartition) ExtentRepair(extentFiles []*storage.FileInfo) {
 	startTime := time.Now().UnixNano()
 	log.LogInfof("action[ExtentRepair] partition[%v] start.", dp.partitionId)
 
 	mf := NewMemberFileMetas()
 
-	addFile := &storage.FileInfo{Source: extentFile.Source, FileId: extentFile.FileId, Size: extentFile.Size, Inode: extentFile.Inode}
-	mf.NeedAddExtentsTasks = append(mf.NeedAddExtentsTasks, addFile)
-	log.LogInfof("action[ExtentRepair] partition[%v] addFile[%v].", dp.partitionId, addFile)
+	for i := 0; i < len(extentFiles); i++ {
+		extentFile := extentFiles[i]
+		addFile := &storage.FileInfo{Source: extentFile.Source, FileId: extentFile.FileId, Size: extentFile.Size, Inode: extentFile.Inode}
+		mf.NeedAddExtentsTasks = append(mf.NeedAddExtentsTasks, addFile)
+		log.LogInfof("action[ExtentRepair] partition[%v] addFile[%v].", dp.partitionId, addFile)
+	}
 
 	dp.MergeRepair(mf)
 
@@ -356,6 +362,7 @@ func (dp *dataPartition) ExtentRepair(extentFile *storage.FileInfo) {
 }
 
 func (dp *dataPartition) ApplyErrRepair (extentId uint64) {
+	extentFiles := make([]*storage.FileInfo, 0)
 	leaderAddr, isLeader := dp.IsLeader()
 	dp.stopRaft()
 	log.LogWarn("action[RaftOp] stop raft partition=%v", dp.partitionId)
@@ -385,6 +392,48 @@ func (dp *dataPartition) ApplyErrRepair (extentId uint64) {
 
 		// Repair local extent
 		extentInfo.Source = leaderAddr
-		dp.ExtentRepair(extentInfo)
+		extentFiles = append(extentFiles, extentInfo)
+		dp.ExtentRepair(extentFiles)
 	}
+}
+
+// Get all files meta
+func (dp *dataPartition) getFileMetas(targetAddr string) (extentFiles []*storage.FileInfo, err error) {
+	// get remote files meta by opGetAllWaterMarker cmd
+	p := NewGetAllWaterMarker(dp.partitionId)
+	var conn *net.TCPConn
+	target := targetAddr
+	conn, err = gConnPool.Get(target) //get remote connect
+	if err != nil {
+		err = errors.Annotatef(err, "getFileMetas  dataPartition[%v] get host[%v] connect", dp.partitionId, target)
+		return
+	}
+	err = p.WriteToConn(conn) //write command to remote host
+	if err != nil {
+		gConnPool.Put(conn, true)
+		err = errors.Annotatef(err, "getFileMetas dataPartition[%v] write to host[%v]", dp.partitionId, target)
+		return
+	}
+	err = p.ReadFromConn(conn, 60) //read it response
+	if err != nil {
+		gConnPool.Put(conn, true)
+		err = errors.Annotatef(err, "getFileMetas dataPartition[%v] read from host[%v]", dp.partitionId, target)
+		return
+	}
+	fileInfos := make([]*storage.FileInfo, 0)
+	err = json.Unmarshal(p.Data[:p.Size], &fileInfos)
+	if err != nil {
+		gConnPool.Put(conn, true)
+		err = errors.Annotatef(err, "getFileMetas dataPartition[%v] unmarshal json[%v]", dp.partitionId, string(p.Data[:p.Size]))
+		return
+	}
+
+	extentFiles = make([]*storage.FileInfo, 0)
+	for _, fileInfo := range fileInfos {
+		extentFiles = append(extentFiles, fileInfo)
+	}
+
+	gConnPool.Put(conn, true)
+
+	return
 }

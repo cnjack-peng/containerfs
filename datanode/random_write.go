@@ -17,7 +17,6 @@ package datanode
 import (
 	_ "net/http/pprof"
 
-	"io"
 	"net"
 	"bytes"
 	"encoding/binary"
@@ -160,8 +159,6 @@ func (dp *dataPartition) RandomPartitionReadCheck(request *Packet, connect net.C
 
 type ItemIterator struct {
 	applyID uint64
-	cur     int
-	total   int
 }
 
 func NewItemIterator(applyID uint64) *ItemIterator {
@@ -175,24 +172,12 @@ func (si *ItemIterator) ApplyIndex() uint64 {
 }
 
 func (si *ItemIterator) Close() {
-	si.cur = si.total + 1
 	return
 }
 
 func (si *ItemIterator) Next() (data []byte, err error) {
-	if si.cur > si.total {
-		err = io.EOF
-		data = nil
-		return
-	}
-	// First Send ApplyIndex
-	if si.cur == 0 {
-		appIdBuf := make([]byte, 8)
-		binary.BigEndian.PutUint64(appIdBuf, si.applyID)
-		data = appIdBuf[:]
-		si.cur++
-		return
-	}
-
+	appIdBuf := make([]byte, 8)
+	binary.BigEndian.PutUint64(appIdBuf, si.applyID)
+	data = appIdBuf[:]
 	return
 }
