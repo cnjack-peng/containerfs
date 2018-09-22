@@ -150,6 +150,7 @@ func (dp *dataPartition) StartSchedule() {
 
 			case opRaftCode := <-dp.raftC:
 				if dp.raftPartition == nil && opRaftCode == opStartRaft{
+					log.LogWarn("action[RaftOp] restart raft partition=%v", dp.partitionId)
 					if err := dp.StartRaft(); err != nil {
 						panic("start raft error")
 					}
@@ -157,6 +158,7 @@ func (dp *dataPartition) StartSchedule() {
 
 			case extentId := <-dp.repairC:
 				dp.ApplyErrRepair(extentId)
+				dp.raftC <- opStartRaft
 
 			case <-timer.C:
 				// Truncate raft log
@@ -344,18 +346,19 @@ func (dp *dataPartition) ExtentRepair(extentFile *storage.FileInfo) {
 
 	addFile := &storage.FileInfo{Source: extentFile.Source, FileId: extentFile.FileId, Size: extentFile.Size, Inode: extentFile.Inode}
 	mf.NeedAddExtentsTasks = append(mf.NeedAddExtentsTasks, addFile)
-	log.LogInfof("action[generatorAddExtentsTasks] partition[%v] addFile[%v].", dp.partitionId, addFile)
+	log.LogInfof("action[ExtentRepair] partition[%v] addFile[%v].", dp.partitionId, addFile)
 
 	dp.MergeRepair(mf)
 
 	finishTime := time.Now().UnixNano()
-	log.LogInfof("action[fileRepair] partition[%v] finish cost[%vms].",
+	log.LogInfof("action[ExtentRepair] partition[%v] finish cost[%vms].",
 		dp.partitionId, (finishTime-startTime)/int64(time.Millisecond))
 }
 
 func (dp *dataPartition) ApplyErrRepair (extentId uint64) {
 	leaderAddr, isLeader := dp.IsLeader()
 	dp.stopRaft()
+	log.LogWarn("action[RaftOp] stop raft partition=%v", dp.partitionId)
 	extentInfo, err := dp.extentStore.GetOneWatermark(extentId, storage.GetStableExtentFilter())
 	if err != nil {
 		err = errors.Annotatef(err, "getAllMemberFileMetas extent dataPartition[%v] GetAllWaterMark", dp.partitionId)
@@ -369,17 +372,19 @@ func (dp *dataPartition) ApplyErrRepair (extentId uint64) {
 		addFile := &storage.FileInfo{Source: leaderAddr, FileId: extentInfo.FileId, Size: extentInfo.Size, Inode: extentInfo.Inode}
 		memberMetas.NeedAddExtentsTasks = append(memberMetas.NeedAddExtentsTasks, addFile)
 		memberMetas.TaskType = FixRaftFollower
-		dp.NotifyRaftFollowerRepair(memberMetas)
-		log.LogInfof("action[RepairRaftFollowerExtent] partition[%v] addFile[%v].", dp.partitionId, addFile)
+		err = dp.NotifyRaftFollowerRepair(memberMetas)
+		if err != nil {
+			log.LogErrorf("action[ExtentRepair] err: %v", err)
+		}
+		log.LogInfof("action[ExtentRepair] leader repair follower partition[%v] addFile[%v].", dp.partitionId, addFile)
 
 	} else if leaderAddr != "" {
 		// If follower apply error, delete local extent and repair from leader
 		dp.extentStore.DeleteDirtyExtent(extentId)
-		log.LogWarnf("[ExtentRepair] Delete dirty extent [%v_%v]", dp.partitionId, extentId)
+		log.LogWarnf("action[ExtentRepair] Delete follower dirty extent [%v_%v]", dp.partitionId, extentId)
 
 		// Repair local extent
 		extentInfo.Source = leaderAddr
 		dp.ExtentRepair(extentInfo)
-		dp.raftC <- opStartRaft
 	}
 }

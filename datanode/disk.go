@@ -210,7 +210,7 @@ func (d *Disk) updateSpaceInfo() (err error) {
 		d.addReadErr()
 	}
 	currErrs := d.ReadErrs + d.WriteErrs
-	if currErrs >= uint64(d.MaxErrs) || d.RandWriteErrs > 0 {
+	if currErrs >= uint64(d.MaxErrs) || d.RandWriteErrs > uint64(d.MaxErrs) {
 		d.Status = proto.Unavaliable
 	} else if d.Available <= 0 {
 		d.Status = proto.ReadOnly
