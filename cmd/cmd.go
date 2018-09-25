@@ -113,7 +113,7 @@ func main() {
 		server = datanode.NewServer()
 		module = ModuleData
 	default:
-		log.LogInfo("Fatal: role mismatch: ", role)
+		fmt.Println("Fatal: role mismatch: ", role)
 		os.Exit(1)
 		return
 	}
