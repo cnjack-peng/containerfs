@@ -33,7 +33,7 @@ import (
 
 func (dp *dataPartition) Apply(command []byte, index uint64) (resp interface{}, err error) {
 	opItem := &rndWrtOpItem{}
-	defer func() {
+	defer func(index uint64) {
 		dp.uploadApplyID(index)
 		if err != nil {
 			resp = proto.OpExistErr
@@ -41,7 +41,7 @@ func (dp *dataPartition) Apply(command []byte, index uint64) (resp interface{}, 
 		} else {
 			resp = proto.OpOk
 		}
-	}()
+	}(index)
 	msg := &RndWrtCmdItem{}
 	if err = msg.rndWrtCmdUnmarshal(command); err != nil {
 		return
@@ -69,11 +69,10 @@ func (dp *dataPartition) Apply(command []byte, index uint64) (resp interface{}, 
 }
 
 func (dp *dataPartition) ApplyMemberChange(confChange *raftproto.ConfChange, index uint64) (resp interface{}, err error) {
-	defer func() {
-		if err == nil {
-			dp.uploadApplyID(index)
-		}
-	}()
+	defer func(index uint64) {
+		dp.uploadApplyID(index)
+	}(index)
+
 	req := &proto.DataPartitionOfflineRequest{}
 	if err = json.Unmarshal(confChange.Context, req); err != nil {
 		return

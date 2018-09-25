@@ -377,7 +377,7 @@ func (dp *dataPartition) ApplyErrRepair(extentId uint64) {
 	extentFiles := make([]*storage.FileInfo, 0)
 	leaderAddr, isLeader := dp.IsLeader()
 	dp.stopRaft()
-	log.LogWarn("action[RaftOp] stop raft partition=%v", dp.partitionId)
+	log.LogWarn("action[ExtentRepair] stop raft partition=%v", dp.partitionId)
 	extentInfo, err := dp.extentStore.GetOneWatermark(extentId, storage.GetStableExtentFilter())
 	if err != nil {
 		err = errors.Annotatef(err, "getAllMemberFileMetas extent dataPartition[%v] GetAllWaterMark", dp.partitionId)
