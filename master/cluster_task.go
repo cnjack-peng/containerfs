@@ -89,12 +89,20 @@ func (c *Cluster) metaPartitionOffline(volName, nodeAddr string, partitionID uin
 		onlineAddrs []string
 		newPeers    []proto.Peer
 		removePeer  proto.Peer
+		metaNode    *MetaNode
+		ns          *NodeSet
 	)
 	log.LogWarnf("action[metaPartitionOffline],volName[%v],nodeAddr[%v],partitionID[%v]", volName, nodeAddr, partitionID)
 	if vol, err = c.getVol(volName); err != nil {
 		goto errDeal
 	}
 	if mp, err = vol.getMetaPartition(partitionID); err != nil {
+		goto errDeal
+	}
+	if metaNode, err = c.getMetaNode(nodeAddr); err != nil {
+		goto errDeal
+	}
+	if ns, err = c.t.getNodeSet(metaNode.NodeSetId); err != nil {
 		goto errDeal
 	}
 	mp.Lock()
@@ -106,8 +114,7 @@ func (c *Cluster) metaPartitionOffline(volName, nodeAddr string, partitionID uin
 	if err = mp.canOffline(nodeAddr, int(vol.mpReplicaNum)); err != nil {
 		goto errDeal
 	}
-
-	if newHosts, newPeers, err = c.getAvailMetaNodeHosts(mp.PersistenceHosts, 1); err != nil {
+	if newHosts, newPeers, err = ns.getAvailMetaNodeHosts(mp.PersistenceHosts, 1); err != nil {
 		goto errDeal
 	}
 
@@ -569,7 +576,7 @@ func (c *Cluster) updateEnd(mp *MetaPartition, mr *proto.MetaPartitionReport, th
 		Warn(c.Name, fmt.Sprintf("mpid[%v],start[%v],mrStart[%v],addr[%v]", mp.PartitionID, mp.Start, mr.Start, metaNode.Addr))
 	}
 
-	hasEnough := c.hasEnoughWritableMetaHosts(int(vol.mpReplicaNum))
+	hasEnough := c.hasEnoughWritableMetaHosts(int(vol.mpReplicaNum), metaNode.NodeSetId)
 	if mp.End == DefaultMaxMetaPartitionInodeID && hasEnough {
 		var end uint64
 		if mr.MaxInodeID <= 0 {

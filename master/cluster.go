@@ -451,7 +451,7 @@ func (c *Cluster) ChooseTargetDataHosts(replicaNum int) (hosts []string, peers [
 	)
 	hosts = make([]string, 0)
 	peers = make([]proto.Peer, 0)
-	ns, err := c.t.allocNodeSet(uint8(replicaNum))
+	ns, err := c.t.allocNodeSetForDataNode(uint8(replicaNum))
 	if err != nil {
 		return nil,nil,errors.Trace(err)
 	}
@@ -754,10 +754,15 @@ func (c *Cluster) CreateMetaPartition(volName string, start, end uint64) (err er
 	return
 }
 
-func (c *Cluster) hasEnoughWritableMetaHosts(replicaNum int) bool {
-	maxTotal := c.GetMetaNodeMaxTotal()
+func (c *Cluster) hasEnoughWritableMetaHosts(replicaNum int,setId uint64) bool {
+	ns, err := c.t.getNodeSet(setId)
+	if err != nil {
+		log.LogErrorf("nodeSet[%v] not exist",setId)
+		return false
+	}
+	maxTotal := ns.GetMetaNodeMaxTotal()
 	excludeHosts := make([]string, 0)
-	nodeTabs, _ := c.GetAvailCarryMetaNodeTab(maxTotal, excludeHosts)
+	nodeTabs, _ := ns.GetAvailCarryMetaNodeTab(maxTotal, excludeHosts)
 	if nodeTabs != nil && len(nodeTabs) >= replicaNum {
 		return true
 	}
@@ -770,9 +775,11 @@ func (c *Cluster) ChooseTargetMetaHosts(replicaNum int) (hosts []string, peers [
 		slaveAddrs []string
 		masterPeer []proto.Peer
 		slavePeers []proto.Peer
+		ns *NodeSet
 	)
+	ns, err = c.t.allocNodeSetForMetaNode(uint8(replicaNum))
 	hosts = make([]string, 0)
-	if masterAddr, masterPeer, err = c.getAvailMetaNodeHosts(hosts, 1); err != nil {
+	if masterAddr, masterPeer, err = ns.getAvailMetaNodeHosts(hosts, 1); err != nil {
 		return nil, nil, errors.Trace(err)
 	}
 	peers = append(peers, masterPeer...)
@@ -781,7 +788,7 @@ func (c *Cluster) ChooseTargetMetaHosts(replicaNum int) (hosts []string, peers [
 	if otherReplica == 0 {
 		return
 	}
-	if slaveAddrs, slavePeers, err = c.getAvailMetaNodeHosts(hosts, otherReplica); err != nil {
+	if slaveAddrs, slavePeers, err = ns.getAvailMetaNodeHosts(hosts, otherReplica); err != nil {
 		return nil, nil, errors.Trace(err)
 	}
 	hosts = append(hosts, slaveAddrs...)

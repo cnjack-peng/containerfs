@@ -51,6 +51,18 @@ func newTopoDataNode(dataNode *DataNode, setId uint64) *TopoDataNode {
 	}
 }
 
+type TopoMetaNode struct {
+	*MetaNode
+	setId uint64
+}
+
+func newTopoMetaNode(metaNode *MetaNode, setId uint64) *TopoMetaNode {
+	return &TopoMetaNode{
+		MetaNode: metaNode,
+		setId:    setId,
+	}
+}
+
 func (t *Topology) replaceDataNode(dataNode *DataNode) {
 	if oldRack, err := t.getRack(dataNode); err == nil {
 		oldRack.PutDataNode(dataNode)
@@ -106,6 +118,24 @@ func (t *Topology) getAvailNodeSetForDataNode() (ns *NodeSet) {
 	return
 }
 
+func (t *Topology) putMetaNode(metaNode *MetaNode) (err error) {
+	if _, ok := t.metaNodes.Load(metaNode.Addr); ok {
+		return
+	}
+	var ns *NodeSet
+	if ns, err = t.getNodeSet(metaNode.NodeSetId); err != nil {
+		return
+	}
+	ns.putMetaNode(metaNode)
+	node := newTopoMetaNode(metaNode, ns.Id)
+	t.putMetaNodeToCache(node)
+	return
+}
+
+func (t *Topology) putMetaNodeToCache(metaNode *TopoMetaNode) {
+	t.metaNodes.Store(metaNode.Addr, metaNode)
+}
+
 func (t *Topology) getAvailNodeSetForMetaNode() (ns *NodeSet) {
 	t.nsLock.RLock()
 	defer t.nsLock.RUnlock()
@@ -146,17 +176,31 @@ func (t *Topology) getNodeSet(setId uint64) (ns *NodeSet, err error) {
 	return
 }
 
-func (t *Topology) allocNodeSet(replicaNum uint8) (ns *NodeSet, err error) {
+func (t *Topology) allocNodeSetForDataNode(replicaNum uint8) (ns *NodeSet, err error) {
 	for i := 0; i < len(t.nodeSetMap); i++ {
 		if t.setIndex >= uint64(len(t.nodeSetMap)) {
 			t.setIndex = 0
 		}
 		ns = t.nodeSetMap[t.setIndex]
-		if ns.canWrite(replicaNum) {
+		if ns.canWriteForDataNode(replicaNum) {
 			return
 		}
 	}
-	log.LogError(fmt.Sprintf("action[allocNodeSet],err:%v", NoNodeSetForCreateDataPartition))
+	log.LogError(fmt.Sprintf("action[allocNodeSetForDataNode],err:%v", NoNodeSetForCreateDataPartition))
+	return nil, NoNodeSetForCreateDataPartition
+}
+
+func (t *Topology) allocNodeSetForMetaNode(replicaNum uint8) (ns *NodeSet, err error) {
+	for i := 0; i < len(t.nodeSetMap); i++ {
+		if t.setIndex >= uint64(len(t.nodeSetMap)) {
+			t.setIndex = 0
+		}
+		ns = t.nodeSetMap[t.setIndex]
+		if ns.canWriteForDataNode(replicaNum) {
+			return
+		}
+	}
+	log.LogError(fmt.Sprintf("action[allocNodeSetForDataNode],err:%v", NoNodeSetForCreateDataPartition))
 	return nil, NoNodeSetForCreateDataPartition
 }
 
@@ -169,6 +213,7 @@ type NodeSet struct {
 	rackLock    sync.RWMutex
 	dataNodeLen int
 	metaNodeLen int
+	metaNodes   sync.Map
 	nsLock      sync.RWMutex
 }
 
@@ -182,13 +227,29 @@ func newNodeSet(id uint64, cap int) *NodeSet {
 	return ns
 }
 
-func (ns *NodeSet) canWrite(replicaNum uint8) bool {
+func (ns *NodeSet) putMetaNode(metaNode *MetaNode) {
+	ns.metaNodes.Store(metaNode.Addr, metaNode)
+}
+
+func (ns *NodeSet) canWriteForDataNode(replicaNum uint8) bool {
 	for _, rack := range ns.rackMap {
 		if rack.canWrite(replicaNum) {
 			return true
 		}
 	}
 	return false
+}
+
+func (ns *NodeSet) canWriteForMetaNode(replicaNum uint8) bool {
+	var count int
+	ns.metaNodes.Range(func(key, value interface{}) bool {
+		node := value.(*MetaNode)
+		if node.IsWriteAble() {
+			count++
+		}
+		return true
+	})
+	return count >= 3
 }
 
 func (ns *NodeSet) isSingleRack() bool {
@@ -305,7 +366,6 @@ func (ns *NodeSet) allocRacks(replicaNum int, excludeRack []string) (racks []*Ra
 type Rack struct {
 	name      string
 	dataNodes sync.Map
-	metaNodes sync.Map
 	sync.RWMutex
 }
 
