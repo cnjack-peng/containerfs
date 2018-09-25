@@ -147,11 +147,13 @@ func (dp *dataPartition) StartSchedule() {
 
 			case <-readyChan:
 				for _, idx := range indexes {
+					log.LogDebugf("[startSchedule] partitionId=%d: applyID=%d", dp.config.PartitionId, idx)
 					go dumpFunc(idx)
 				}
 				indexes = nil
 			case applyId := <-dp.storeC:
 				indexes = append(indexes, applyId)
+				log.LogDebugf("[startSchedule] partitionId=%d: applyID=%d", dp.config.PartitionId, applyId)
 			case opRaftCode := <-dp.raftC:
 				if dp.raftPartition == nil && opRaftCode == opStartRaft {
 					log.LogWarn("action[RaftOp] restart raft partition=%v", dp.partitionId)
