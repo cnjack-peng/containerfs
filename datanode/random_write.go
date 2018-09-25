@@ -146,10 +146,10 @@ func (dp *dataPartition) RandomPartitionReadCheck(request *Packet, connect net.C
 	}
 
 	if dp.applyId+1 < dp.raftPartition.CommittedIndex() {
-		err = storage.ErrorAgain
+		//err = storage.ErrorAgain
 		log.LogErrorf("[randomWrite] read ErrorAgain partition=%v dp applyId=%v committedId=%v raftApplied=%v",
 			dp.partitionId, dp.applyId, dp.raftPartition.CommittedIndex(), dp.raftPartition.AppliedIndex())
-		return
+		//return
 	}
 
 	log.LogDebugf("[randomWrite] read check pass! dp=%v applied=%v committed=%v",
