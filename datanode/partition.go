@@ -231,6 +231,7 @@ func newDataPartition(dpCfg *dataPartitionCfg, disk *Disk) (dp DataPartition, er
 		partitionSize:   dpCfg.PartitionSize,
 		replicaHosts:    make([]string, 0),
 		stopC:           make(chan bool, 0),
+		storeC:          make(chan uint64, 128),
 		partitionStatus: proto.ReadWrite,
 		runtimeMetrics:  NewDataPartitionMetrics(),
 		config:          dpCfg,

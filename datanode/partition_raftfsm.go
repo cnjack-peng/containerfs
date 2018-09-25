@@ -194,5 +194,4 @@ func (dp *dataPartition) Del(key interface{}) (interface{}, error) {
 
 func (dp *dataPartition) uploadApplyID(applyId uint64) {
 	atomic.StoreUint64(&dp.applyId, applyId)
-	dp.storeApplyIndex(applyId)
 }

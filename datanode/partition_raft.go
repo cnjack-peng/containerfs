@@ -115,7 +115,8 @@ func (dp *dataPartition) stopRaft() {
 
 func (dp *dataPartition) StartSchedule() {
 	var isRunning bool
-	timer := time.NewTimer(time.Minute*10)
+	truncRaftlogTimer := time.NewTimer(time.Minute * 30)
+	storeAppliedTimer := time.NewTimer(time.Minute * 5)
 
 	dumpFunc := func(applyIndex uint64) {
 		log.LogDebugf("[startSchedule] partitionId=%d: applyID=%d", dp.config.PartitionId, applyIndex)
@@ -140,7 +141,8 @@ func (dp *dataPartition) StartSchedule() {
 			}
 			select {
 			case <-stopC:
-				timer.Stop()
+				truncRaftlogTimer.Stop()
+				storeAppliedTimer.Stop()
 				return
 
 			case <-readyChan:
@@ -148,9 +150,8 @@ func (dp *dataPartition) StartSchedule() {
 					go dumpFunc(idx)
 				}
 				indexes = nil
-			case applyIndex := <-dp.storeC:
-				indexes = append(indexes, applyIndex)
-
+			case applyId := <-dp.storeC:
+				indexes = append(indexes, applyId)
 			case opRaftCode := <-dp.raftC:
 				if dp.raftPartition == nil && opRaftCode == opStartRaft {
 					log.LogWarn("action[RaftOp] restart raft partition=%v", dp.partitionId)
@@ -158,18 +159,18 @@ func (dp *dataPartition) StartSchedule() {
 						panic("start raft error")
 					}
 				}
-
 			case extentId := <-dp.repairC:
 				dp.ApplyErrRepair(extentId)
 				dp.raftC <- opStartRaft
 
-			case <-timer.C:
+			case <-truncRaftlogTimer.C:
 				dp.getMinAppliedId()
 				if dp.minAppliedId > dp.lastTruncatId { // Has changed
 					dp.raftPartition.Truncate(dp.minAppliedId)
 					dp.lastTruncatId = dp.minAppliedId
 				}
-
+			case <-storeAppliedTimer.C:
+				dp.storeC <- dp.applyId
 			}
 		}
 	}(dp.stopC)
@@ -470,17 +471,20 @@ func (dp *dataPartition) getMinAppliedId() {
 		minAppliedId uint64
 		err          error
 	)
-	// send the last minAppliedId and get current appliedId
-	p := NewGetAppliedId(dp.partitionId, dp.minAppliedId)
+
 	defer func(newMinAppliedId uint64) {
 		if err == nil {
+			log.LogDebugf("[getMinAppliedId] success old minAppId=%v newAppId=%v", dp.minAppliedId, newMinAppliedId)
 			//success maybe update the minAppliedId
 			dp.minAppliedId = newMinAppliedId
 		} else {
 			//do nothing
+			log.LogErrorf("[getMinAppliedId] newAppId=%v err %v", newMinAppliedId, err)
 		}
 	}(minAppliedId)
 
+	// send the last minAppliedId and get current appliedId
+	p := NewGetAppliedId(dp.partitionId, dp.minAppliedId)
 	minAppliedId = dp.applyId
 	for i := 1; i < len(dp.replicaHosts); i++ {
 		var conn *net.TCPConn

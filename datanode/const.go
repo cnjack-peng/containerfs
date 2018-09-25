@@ -109,6 +109,7 @@ const (
 
 const (
 	maxApplyErrRetry = 10
+	storeApplyIdNum  = 64
 )
 
 const (
