@@ -52,15 +52,15 @@ func (dp *dataPartition) Apply(command []byte, index uint64) (resp interface{}, 
 		if opItem, err = rndWrtDataUnmarshal(msg.V); err != nil {
 			return
 		}
+		log.LogDebugf("[randomWrite] apply %v_%v_%v_%v ", dp.ID(), opItem.extentId, opItem.offset, opItem.size)
 		for i := 0; i < maxApplyErrRetry; i++ {
 			err = dp.GetExtentStore().Write(opItem.extentId, opItem.offset, opItem.size, opItem.data, opItem.crc)
 			dp.addDiskErrs(err, WriteFlag)
 			if err == nil {
 				break
 			}
-			log.LogErrorf("[randomWriteStore] dp[%v] write err[%v] retry[%v]", dp.ID(), err, i)
+			log.LogErrorf("[randomWrite] dp[%v] write err[%v] retry[%v]", dp.ID(), err, i)
 		}
-
 	default:
 		err = fmt.Errorf(fmt.Sprintf("Wrong random operate %v", msg.Op))
 		return
@@ -90,11 +90,12 @@ func (dp *dataPartition) ApplyMemberChange(confChange *raftproto.ConfChange, ind
 		updated, err = dp.confUpdateNode(req, index)
 	}
 	if err != nil {
+		log.LogErrorf("action[ApplyMemberChange] dp[%v] type[%v] err[%v].", dp.partitionId, confChange.Type, err)
 		return
 	}
 	if updated {
 		if err = dp.StoreMeta(); err != nil {
-			log.LogErrorf("action[ApplyMemberChange] err[%v].", err)
+			log.LogErrorf("action[ApplyMemberChange] dp[%v] StoreMeta err[%v].", dp.partitionId, err)
 			return
 		}
 	}
