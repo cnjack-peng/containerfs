@@ -16,6 +16,7 @@ package stream
 
 import (
 	"encoding/binary"
+	"fmt"
 	"github.com/tiglabs/containerfs/proto"
 	"github.com/tiglabs/containerfs/sdk/data/wrapper"
 	"github.com/tiglabs/containerfs/util"
@@ -31,6 +32,10 @@ type Packet struct {
 	kernelOffset int
 	orgSize      uint32
 	orgData      []byte
+}
+
+func (p *Packet) String() string {
+	return fmt.Sprintf("ReqID(%v) PartitionID(%v) FileID(%v) Offset((%v) CRC(%v)", p.ReqID, p.PartitionID, p.FileID, p.Offset, p.Crc)
 }
 
 func NewWritePacket(dp *wrapper.DataPartition, extentId uint64, offset int, kernelOffset int, isRandom bool) (p *Packet) {

@@ -221,6 +221,22 @@ func (sw *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error) {
 	size := req.Size
 	ekOffset := int(req.ExtentKey.FileOffset)
 
+	if sw.currentWriter != nil {
+		currPacket := sw.currentWriter.currentPacket
+		kernelOffset := currPacket.kernelOffset
+		packSize := int(currPacket.Size)
+		if kernelOffset < offset && offset < kernelOffset+packSize {
+			fileEnd := util.Min(kernelOffset+packSize, offset+size)
+			copy(currPacket.Data[offset-kernelOffset:fileEnd-kernelOffset], req.Data[:fileEnd-offset])
+			total += (fileEnd - offset)
+			log.LogDebugf("doRewrite: rewrite current writer from (%v) to (%v)", offset, fileEnd)
+		}
+	}
+
+	if total >= size {
+		return
+	}
+
 	if dp, err = gDataWrapper.GetDataPartition(req.ExtentKey.PartitionId); err != nil {
 		log.LogErrorf("doRewrite: failed to get datapartition, ek(%v), err(%v)", req.ExtentKey, err)
 		return
@@ -257,9 +273,15 @@ func (sw *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error) {
 			break
 		}
 
-		if replyPacket.ResultCode != proto.OpOk || !reqPacket.IsEqualWriteReply(replyPacket) || reqPacket.Crc != replyPacket.Crc {
-			err = errors.New(fmt.Sprintf("reply NOK, req(%v) reply(%v)", reqPacket, replyPacket))
-			log.LogErrorf("doRewrite: err(%v)", err)
+		if replyPacket.ResultCode != proto.OpOk {
+			err = errors.New(fmt.Sprintf("doRewrite: ResultCode(%v) NOK", replyPacket.GetResultMesg()))
+			log.LogError(err)
+			break
+		}
+
+		if !reqPacket.IsEqualWriteReply(replyPacket) || reqPacket.Crc != replyPacket.Crc {
+			err = errors.New(fmt.Sprintf("doRewrite: is not the corresponding reply, req(%v) reply(%v)", reqPacket, replyPacket))
+			log.LogError(err)
 			break
 		}
 

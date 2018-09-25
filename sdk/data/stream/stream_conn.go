@@ -37,7 +37,7 @@ func NewStreamConn(dp *wrapper.DataPartition) *StreamConn {
 }
 
 func (sc *StreamConn) String() string {
-	return fmt.Sprintf("Partition(%v) Leader(%v) Hosts(%v)", sc.partition, sc.currAddr, sc.hosts)
+	return fmt.Sprintf("Partition(%v) CurrentAddr(%v) Hosts(%v)", sc.partition, sc.currAddr, sc.hosts)
 }
 
 func (sc *StreamConn) Send(req *Packet, getReply GetReplyFunc) (err error) {
@@ -59,17 +59,19 @@ func (sc *StreamConn) sendToPartition(req *Packet, getReply GetReplyFunc) (err e
 			StreamConnPool.Put(conn, false)
 			return
 		}
+		log.LogWarnf("sendToPartition: curr addr failed, sc(%v) req(%v) err(%v)", sc, req, err)
 		StreamConnPool.Put(conn, true)
 	}
 
 	for _, addr := range sc.hosts {
 		conn, err = StreamConnPool.Get(addr)
 		if err != nil {
+			log.LogWarnf("sendToPartition: failed to get connection to (%v) sc(%v) req(%v) err(%v)", addr, sc, req, err)
 			continue
 		}
+		sc.currAddr = addr
 		err = sc.sendToConn(conn, req, getReply)
 		if err == nil {
-			sc.currAddr = addr
 			StreamConnPool.Put(conn, false)
 			return
 		}
@@ -100,5 +102,7 @@ func (sc *StreamConn) sendToConn(conn *net.TCPConn, req *Packet, getReply GetRep
 	if err != nil {
 		log.LogWarn(err)
 	}
+
+	log.LogDebugf("sendToPartition: send to sc(%v) successsful, req(%v)", sc, req)
 	return
 }
