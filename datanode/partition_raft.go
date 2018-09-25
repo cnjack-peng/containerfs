@@ -165,9 +165,9 @@ func (dp *dataPartition) StartSchedule() {
 
 			case <-truncRaftlogTimer.C:
 				dp.getMinAppliedId()
-				if dp.minAppliedId > dp.lastTruncatId { // Has changed
-					dp.raftPartition.Truncate(dp.minAppliedId)
-					dp.lastTruncatId = dp.minAppliedId
+				if dp.minAppliedId > dp.lastTruncateId { // Has changed
+					go dp.raftPartition.Truncate(dp.minAppliedId)
+					dp.lastTruncateId = dp.minAppliedId
 				}
 			case <-storeAppliedTimer.C:
 				dp.storeC <- dp.applyId
@@ -458,6 +458,7 @@ func NewGetAppliedId(partitionId uint32, minAppliedId uint64) (p *Packet) {
 	p.ReqID = proto.GetReqID()
 	p.Data = make([]byte, 8)
 	binary.BigEndian.PutUint64(p.Data, minAppliedId)
+	p.Size = uint32(len(p.Data))
 	return
 }
 

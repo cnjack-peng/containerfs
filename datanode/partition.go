@@ -145,7 +145,7 @@ type dataPartition struct {
 	raftPartition   raftstore.Partition
 	config          *dataPartitionCfg
 	applyId         uint64
-	lastTruncatId   uint64
+	lastTruncateId  uint64
 	minAppliedId    uint64
 	raftC           chan uint32
 	repairC         chan uint64
