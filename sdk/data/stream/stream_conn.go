@@ -82,16 +82,18 @@ func (sc *StreamConn) sendToPartition(req *Packet, getReply GetReplyFunc) (err e
 
 func (sc *StreamConn) sendToConn(conn *net.TCPConn, req *Packet, getReply GetReplyFunc) (err error) {
 	for i := 0; i < StreamSendMaxRetry; i++ {
+		log.LogDebugf("sendToPartition: send to sc(%v), req(%v)", sc, req)
 		err = req.WriteToConn(conn)
 		if err != nil {
 			err = errors.Annotatef(err, "sendToConn: failed to write to connect sc(%v)", sc)
 			break
 		}
 
-		err, again := getReply(conn)
+		var again bool
+		err, again = getReply(conn)
 		if !again {
 			if err != nil {
-				err = errors.Annotatef(err, "sc(%v)", sc)
+				err = errors.Annotatef(err, "sendToConn: getReply error sc(%v)", sc)
 			}
 			break
 		}

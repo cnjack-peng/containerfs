@@ -58,9 +58,12 @@ func (reader *ExtentReader) Read(req *ExtentRequest) (readBytes int, err error) 
 			bufSize := util.Min(util.ReadBlockSize, size-readBytes)
 			replyPacket.Data = req.Data[readBytes : readBytes+bufSize]
 			e := replyPacket.ReadFromConnStream(conn, proto.ReadDeadlineTime)
+			log.LogDebugf("ExtentReader Read: Read from conn err(%v)", e)
 			if e != nil {
 				return errors.Annotatef(e, "Extent Reader Read: failed to read from connect"), false
 			}
+
+			log.LogDebugf("ExtentReader Read: ResultCode(%v) req(%v) reply(%v)", replyPacket.GetResultMesg(), reqPacket, replyPacket)
 
 			if replyPacket.ResultCode == proto.OpAgain {
 				return nil, true
@@ -68,6 +71,7 @@ func (reader *ExtentReader) Read(req *ExtentRequest) (readBytes int, err error) 
 
 			e = reader.checkStreamReply(reqPacket, replyPacket)
 			if e != nil {
+				log.LogDebug(e)
 				return e, false
 			}
 
@@ -84,20 +88,17 @@ func (reader *ExtentReader) Read(req *ExtentRequest) (readBytes int, err error) 
 
 func (reader *ExtentReader) checkStreamReply(request *Packet, reply *Packet) (err error) {
 	if reply.ResultCode != proto.OpOk {
-		return errors.Annotatef(fmt.Errorf("reply status code(%v) is not ok,request (%v) "+
-			"but reply (%v) ", reply.ResultCode, request.GetUniqueLogId(), reply.GetUniqueLogId()),
-			fmt.Sprintf("reader(%v)", reader))
+		err = errors.New(fmt.Sprintf("checkStreamReply: ResultCode(%v) NOK", reply.GetResultMesg()))
+		return
 	}
 	if !request.IsEqualStreamReadReply(reply) {
-		return errors.Annotatef(fmt.Errorf("request not equare reply , request (%v) "+
-			"and reply (%v) ", request.GetUniqueLogId(), reply.GetUniqueLogId()),
-			fmt.Sprintf("reader(%v)", reader))
+		err = errors.New(fmt.Sprintf("checkStreamReply: inconsistent req and reply, req(%v) reply(%v)", request, reply))
+		return
 	}
 	expectCrc := crc32.ChecksumIEEE(reply.Data[:reply.Size])
 	if reply.Crc != expectCrc {
-		return errors.Annotatef(fmt.Errorf("crc not match on  request (%v) "+
-			"and reply (%v) expectCrc(%v) but reciveCrc(%v) ", request.GetUniqueLogId(), reply.GetUniqueLogId(), expectCrc, reply.Crc),
-			fmt.Sprintf("reader(%v)", reader))
+		err = errors.New(fmt.Sprintf("checkStreamReply: inconsistent CRC, expectCRC(%v) replyCRC(%v)", expectCrc, reply.Crc))
+		return
 	}
 	return nil
 }
