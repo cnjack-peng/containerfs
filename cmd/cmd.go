@@ -142,7 +142,7 @@ func main() {
 	}
 
 	if _, err := log.InitLog(logDir, module, level); err != nil {
-		fmt.Println("Fatal: failed to start the baud storage daemon - ", err)
+		fmt.Println("Fatal: failed to init log - ", err)
 		os.Exit(1)
 		return
 	}
@@ -150,6 +150,7 @@ func main() {
 	interceptSignal(server)
 	err := server.Start(cfg)
 	if err != nil {
+		fmt.Println("Fatal: failed to start the baud storage daemon - ", err)
 		log.LogFatal("Fatal: failed to start the baud storage daemon - ", err)
 		log.LogFlush()
 		os.Exit(1)
