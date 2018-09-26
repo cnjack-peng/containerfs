@@ -90,7 +90,7 @@ func (dp *dataPartition) StartRaft() (err error) {
 		}
 		peers = append(peers, rp)
 	}
-	log.LogDebugf("start partition id=%d raft peers: %s path: %s",
+	log.LogDebugf("start partition=%v raft peers: %s path: %s",
 		dp.partitionId, peers, dp.path)
 	pc := &raftstore.PartitionConfig{
 		ID:      uint64(dp.partitionId),
@@ -123,7 +123,7 @@ func (dp *dataPartition) StartSchedule() {
 		if err := dp.storeApplyIndex(applyIndex); err != nil {
 			//retry
 			dp.storeC <- applyIndex
-			err = errors.Errorf("[startSchedule]: dump partition id=%d: %v", dp.config.PartitionId, err.Error())
+			err = errors.Errorf("[startSchedule]: dump partition=%d: %v", dp.config.PartitionId, err.Error())
 			log.LogErrorf(err.Error())
 		}
 		isRunning = false
@@ -357,7 +357,7 @@ func (s *DataNode) stopRaftServer() {
 
 func (dp *dataPartition) ExtentRepair(extentFiles []*storage.FileInfo) {
 	startTime := time.Now().UnixNano()
-	log.LogInfof("action[ExtentRepair] partition[%v] start.", dp.partitionId)
+	log.LogInfof("action[ExtentRepair] partition=%v start.", dp.partitionId)
 
 	mf := NewMemberFileMetas()
 
@@ -365,13 +365,13 @@ func (dp *dataPartition) ExtentRepair(extentFiles []*storage.FileInfo) {
 		extentFile := extentFiles[i]
 		addFile := &storage.FileInfo{Source: extentFile.Source, FileId: extentFile.FileId, Size: extentFile.Size, Inode: extentFile.Inode}
 		mf.NeedAddExtentsTasks = append(mf.NeedAddExtentsTasks, addFile)
-		log.LogInfof("action[ExtentRepair] partition[%v] addFile[%v].", dp.partitionId, addFile)
+		log.LogInfof("action[ExtentRepair] partition=%v addFile[%v].", dp.partitionId, addFile)
 	}
 
 	dp.MergeRepair(mf)
 
 	finishTime := time.Now().UnixNano()
-	log.LogInfof("action[ExtentRepair] partition[%v] finish cost[%vms].",
+	log.LogInfof("action[ExtentRepair] partition=%v finish cost[%vms].",
 		dp.partitionId, (finishTime-startTime)/int64(time.Millisecond))
 }
 
@@ -397,7 +397,7 @@ func (dp *dataPartition) ApplyErrRepair(extentId uint64) {
 		if err != nil {
 			log.LogErrorf("action[ExtentRepair] err: %v", err)
 		}
-		log.LogInfof("action[ExtentRepair] leader repair follower partition[%v] addFile[%v].", dp.partitionId, addFile)
+		log.LogInfof("action[ExtentRepair] leader repair follower partition=%v addFile[%v].", dp.partitionId, addFile)
 
 	} else if leaderAddr != "" {
 		// If follower apply error, delete local extent and repair from leader
@@ -419,26 +419,26 @@ func (dp *dataPartition) getFileMetas(targetAddr string) (extentFiles []*storage
 	target := targetAddr
 	conn, err = gConnPool.Get(target) //get remote connect
 	if err != nil {
-		err = errors.Annotatef(err, "getFileMetas  dataPartition[%v] get host[%v] connect", dp.partitionId, target)
+		err = errors.Annotatef(err, "getFileMetas  partition=%v get host[%v] connect", dp.partitionId, target)
 		return
 	}
 	err = p.WriteToConn(conn) //write command to remote host
 	if err != nil {
 		gConnPool.Put(conn, true)
-		err = errors.Annotatef(err, "getFileMetas dataPartition[%v] write to host[%v]", dp.partitionId, target)
+		err = errors.Annotatef(err, "getFileMetas partition=%v write to host[%v]", dp.partitionId, target)
 		return
 	}
 	err = p.ReadFromConn(conn, 60) //read it response
 	if err != nil {
 		gConnPool.Put(conn, true)
-		err = errors.Annotatef(err, "getFileMetas dataPartition[%v] read from host[%v]", dp.partitionId, target)
+		err = errors.Annotatef(err, "getFileMetas partition=%v read from host[%v]", dp.partitionId, target)
 		return
 	}
 	fileInfos := make([]*storage.FileInfo, 0)
 	err = json.Unmarshal(p.Data[:p.Size], &fileInfos)
 	if err != nil {
 		gConnPool.Put(conn, true)
-		err = errors.Annotatef(err, "getFileMetas dataPartition[%v] unmarshal json[%v]", dp.partitionId, string(p.Data[:p.Size]))
+		err = errors.Annotatef(err, "getFileMetas partition=%v unmarshal json[%v]", dp.partitionId, string(p.Data[:p.Size]))
 		return
 	}
 
@@ -477,12 +477,14 @@ func (dp *dataPartition) getMinAppliedId() {
 
 	defer func(newMinAppliedId uint64) {
 		if err == nil {
-			log.LogDebugf("[getMinAppliedId] success old minAppId=%v newAppId=%v", dp.minAppliedId, newMinAppliedId)
+			log.LogDebugf("[getMinAppliedId] partition=%v success old minAppId=%v newAppId=%v",
+				dp.partitionId, dp.minAppliedId, newMinAppliedId)
 			//success maybe update the minAppliedId
 			dp.minAppliedId = newMinAppliedId
 		} else {
 			//do nothing
-			log.LogErrorf("[getMinAppliedId] newAppId=%v err %v", newMinAppliedId, err)
+			log.LogErrorf("[getMinAppliedId] partition=%v newAppId=%v err %v",
+				dp.partitionId, newMinAppliedId, err)
 		}
 	}(minAppliedId)
 
@@ -494,20 +496,20 @@ func (dp *dataPartition) getMinAppliedId() {
 		target := dp.replicaHosts[i]
 		conn, err = gConnPool.Get(target) //get remote connect
 		if err != nil {
-			err = errors.Annotatef(err, "getMinAppliedId  dp[%v] get host[%v] connect", dp.partitionId, target)
+			err = errors.Annotatef(err, "getMinAppliedId  partition=%v get host[%v] connect", dp.partitionId, target)
 			return
 		}
 
 		err = p.WriteToConn(conn) //write command to remote host
 		if err != nil {
 			gConnPool.Put(conn, true)
-			err = errors.Annotatef(err, "getMinAppliedId dp[%v] write to host[%v]", dp.partitionId, target)
+			err = errors.Annotatef(err, "getMinAppliedId partition=%v write to host[%v]", dp.partitionId, target)
 			return
 		}
 		err = p.ReadFromConn(conn, 60) //read it response
 		if err != nil {
 			gConnPool.Put(conn, true)
-			err = errors.Annotatef(err, "getMinAppliedId dp[%v] read from host[%v]", dp.partitionId, target)
+			err = errors.Annotatef(err, "getMinAppliedId partition=%v read from host[%v]", dp.partitionId, target)
 			return
 		}
 
