@@ -494,6 +494,9 @@ func (dp *dataPartition) getMinAppliedId() {
 				dp.partitionId, firstHost, LocalIP, dp.replicaHosts[0])
 			return
 		}
+	} else {
+		log.LogDebugf("[getMinAppliedId] partition=%v firstHost is nil localIp[%v]",	dp.partitionId, LocalIP)
+		return
 	}
 
 	defer func(newMinAppliedId uint64) {
