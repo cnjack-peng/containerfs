@@ -155,10 +155,12 @@ func (dp *dataPartition) StartSchedule() {
 					go dumpFunc(idx)
 				}
 				indexes = nil
+
 			case applyId := <-dp.storeC:
 				indexes = append(indexes, applyId)
 				log.LogDebugf("[startSchedule] store apply id partitionId=%d: applyID=%d",
 					dp.config.PartitionId, applyId)
+
 			case opRaftCode := <-dp.raftC:
 				if dp.raftPartition == nil && opRaftCode == opStartRaft {
 					log.LogWarn("action[startRaft] restart raft partition=%v", dp.partitionId)
@@ -166,6 +168,7 @@ func (dp *dataPartition) StartSchedule() {
 						panic("start raft error")
 					}
 				}
+
 			case extentId := <-dp.repairC:
 				dp.applyErrRepair(extentId)
 				dp.raftC <- opStartRaft
@@ -178,6 +181,7 @@ func (dp *dataPartition) StartSchedule() {
 					go dp.raftPartition.Truncate(dp.minAppliedId)
 					dp.lastTruncateId = dp.minAppliedId
 				}
+
 			case <-storeAppliedTimer.C:
 				dp.storeC <- dp.applyId
 			}
@@ -480,13 +484,16 @@ func (dp *dataPartition) getMinAppliedId() {
 		minAppliedId uint64
 		err          error
 	)
-	//only first host get applied
-	if len(dp.replicaHosts) == 0 {
-		return
-	}
 
-	if strings.Split(dp.replicaHosts[0], ":")[0] != LocalIP {
-		return
+	//only first host get applied
+	if len(dp.replicaHosts) > 0 {
+		replicaAddrParts := strings.Split(dp.replicaHosts[0], ":")
+		firstHost := strings.TrimSpace(replicaAddrParts[0])
+		if firstHost != LocalIP {
+			log.LogDebugf("[getMinAppliedId] partition=%v notHostLeader firstHost[%v] localIp[%v] replicHosts[0]=[%v]",
+				dp.partitionId, firstHost, LocalIP, dp.replicaHosts[0])
+			return
+		}
 	}
 
 	defer func(newMinAppliedId uint64) {
