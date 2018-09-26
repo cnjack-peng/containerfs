@@ -81,12 +81,16 @@ func (reader *ExtentReader) Read(req *ExtentRequest) (readBytes int, err error) 
 	})
 
 	if err != nil {
-		log.LogErrorf("Extent Reader Read: err(%v)", err)
+		log.LogErrorf("Extent Reader Read: err(%v) req(%v) reqPacket(%v)", err, req, reqPacket)
 	}
 	return
 }
 
 func (reader *ExtentReader) checkStreamReply(request *Packet, reply *Packet) (err error) {
+	if reply.ResultCode == proto.OpNotLeaderErr {
+		return NotLeaderError
+	}
+
 	if reply.ResultCode != proto.OpOk {
 		err = errors.New(fmt.Sprintf("checkStreamReply: ResultCode(%v) NOK", reply.GetResultMesg()))
 		return

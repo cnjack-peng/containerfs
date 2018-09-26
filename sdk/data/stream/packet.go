@@ -35,7 +35,7 @@ type Packet struct {
 }
 
 func (p *Packet) String() string {
-	return fmt.Sprintf("ReqID(%v) PartitionID(%v) FileID(%v) Offset((%v) CRC(%v)", p.ReqID, p.PartitionID, p.FileID, p.Offset, p.Crc)
+	return fmt.Sprintf("ReqID(%v) Op(%v) PartitionID(%v) FileID(%v) Offset((%v) CRC(%v)", p.ReqID, p.GetOpMsg(), p.PartitionID, p.FileID, p.Offset, p.Crc)
 }
 
 func NewWritePacket(dp *wrapper.DataPartition, extentId uint64, offset int, kernelOffset int, isRandom bool) (p *Packet) {

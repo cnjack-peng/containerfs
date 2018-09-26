@@ -238,7 +238,7 @@ func (sw *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error) {
 	}
 
 	if dp, err = gDataWrapper.GetDataPartition(req.ExtentKey.PartitionId); err != nil {
-		log.LogErrorf("doRewrite: failed to get datapartition, ek(%v), err(%v)", req.ExtentKey, err)
+		errors.Annotatef(err, "doRewrite: failed to get datapartition, ek(%v)", req.ExtentKey)
 		return
 	}
 
@@ -263,25 +263,18 @@ func (sw *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error) {
 			}
 
 			if replyPacket.ResultCode == proto.OpNotLeaderErr {
-				e = errors.New(fmt.Sprintf("Stream Writer doRewrite: Not leader"))
+				e = NotLeaderError
 			}
 			return e, false
 		})
 
-		if err != nil {
-			log.LogErrorf("doRewrite failed: err(%v)", err)
-			break
-		}
-
-		if replyPacket.ResultCode != proto.OpOk {
-			err = errors.New(fmt.Sprintf("doRewrite: ResultCode(%v) NOK", replyPacket.GetResultMesg()))
-			log.LogError(err)
+		if err != nil || replyPacket.ResultCode != proto.OpOk {
+			err = errors.Annotatef(err, "doRewrite failed: req(%v) reqPacket(%v) replyPacket(%v)", req, reqPacket, replyPacket)
 			break
 		}
 
 		if !reqPacket.IsEqualWriteReply(replyPacket) || reqPacket.Crc != replyPacket.Crc {
-			err = errors.New(fmt.Sprintf("doRewrite: is not the corresponding reply, req(%v) reply(%v)", reqPacket, replyPacket))
-			log.LogError(err)
+			err = errors.New(fmt.Sprintf("doRewrite: is not the corresponding reply, req(%v) reqPacket(%v) replyPacket(%v)", req, reqPacket, replyPacket))
 			break
 		}
 

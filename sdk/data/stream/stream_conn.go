@@ -11,6 +11,10 @@ import (
 	"github.com/tiglabs/containerfs/util/pool"
 )
 
+var (
+	NotLeaderError = errors.New("NotLeaderError")
+)
+
 const (
 	StreamSendMaxRetry      = 100
 	StreamSendSleepInterval = 100 * time.Millisecond
@@ -46,9 +50,9 @@ func (sc *StreamConn) Send(req *Packet, getReply GetReplyFunc) (err error) {
 		if err == nil {
 			return
 		}
-		log.LogWarnf("Send: err(%v)", err)
+		log.LogWarnf("StreamConn Send: err(%v)", err)
 	}
-	return errors.New(fmt.Sprintf("Send: retried %v times and still failed, sc(%v)", StreamSendMaxRetry, sc))
+	return errors.New(fmt.Sprintf("StreamConn Send: retried %v times and still failed, sc(%v) req(%v)", StreamSendMaxRetry, sc, req))
 }
 
 func (sc *StreamConn) sendToPartition(req *Packet, getReply GetReplyFunc) (err error) {
@@ -59,14 +63,18 @@ func (sc *StreamConn) sendToPartition(req *Packet, getReply GetReplyFunc) (err e
 			StreamConnPool.Put(conn, false)
 			return
 		}
-		log.LogWarnf("sendToPartition: curr addr failed, sc(%v) req(%v) err(%v)", sc, req, err)
+		log.LogWarnf("sendToPartition: curr addr failed, addr(%v) req(%v) err(%v)", sc.currAddr, req, err)
 		StreamConnPool.Put(conn, true)
+		if err != NotLeaderError {
+			return
+		}
 	}
 
 	for _, addr := range sc.hosts {
+		log.LogWarnf("sendToPartition: try addr(%v) req(%v)", addr, req)
 		conn, err = StreamConnPool.Get(addr)
 		if err != nil {
-			log.LogWarnf("sendToPartition: failed to get connection to (%v) sc(%v) req(%v) err(%v)", addr, sc, req, err)
+			log.LogWarnf("sendToPartition: failed to get connection to addr(%v) req(%v) err(%v)", addr, req, err)
 			continue
 		}
 		sc.currAddr = addr
@@ -76,16 +84,20 @@ func (sc *StreamConn) sendToPartition(req *Packet, getReply GetReplyFunc) (err e
 			return
 		}
 		StreamConnPool.Put(conn, true)
+		if err != NotLeaderError {
+			return
+		}
 	}
-	return errors.New(fmt.Sprintf("sendToPatition Failed: sc(%v)", sc))
+	return errors.New(fmt.Sprintf("sendToPatition Failed: sc(%v) req(%v)", sc, req))
 }
 
 func (sc *StreamConn) sendToConn(conn *net.TCPConn, req *Packet, getReply GetReplyFunc) (err error) {
 	for i := 0; i < StreamSendMaxRetry; i++ {
-		log.LogDebugf("sendToPartition: send to sc(%v), req(%v)", sc, req)
+		log.LogDebugf("sendToConn: send to addr(%v), req(%v)", sc.currAddr, req)
 		err = req.WriteToConn(conn)
 		if err != nil {
-			err = errors.Annotatef(err, "sendToConn: failed to write to connect sc(%v)", sc)
+			msg := fmt.Sprintf("sendToConn: failed to write to addr(%v) err(%v)", sc.currAddr, err)
+			log.LogWarn(msg)
 			break
 		}
 
@@ -93,18 +105,15 @@ func (sc *StreamConn) sendToConn(conn *net.TCPConn, req *Packet, getReply GetRep
 		err, again = getReply(conn)
 		if !again {
 			if err != nil {
-				err = errors.Annotatef(err, "sendToConn: getReply error sc(%v)", sc)
+				log.LogWarnf("sendToConn: getReply error and RETURN, addr(%v) req(%v) err(%v)", sc.currAddr, req, err)
 			}
 			break
 		}
 
+		log.LogWarnf("sendToConn: getReply error and will RETRY, sc(%v) err(%v)", sc, err)
 		time.Sleep(StreamSendSleepInterval)
 	}
 
-	if err != nil {
-		log.LogWarn(err)
-	}
-
-	log.LogDebugf("sendToPartition: send to sc(%v) successsful, req(%v)", sc, req)
+	log.LogDebugf("sendToConn exit: send to addr(%v) req(%v) err(%v)", sc.currAddr, req, err)
 	return
 }
