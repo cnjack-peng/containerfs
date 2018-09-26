@@ -121,6 +121,7 @@ func (dp *dataPartition) ApplySnapshot(peers []raftproto.Peer, iterator raftprot
 		appIndexID  uint64
 		extentFiles []*storage.FileInfo
 		targetAddr  string
+		firstHost   string
 	)
 	defer func() {
 		if err == io.EOF {
@@ -129,15 +130,24 @@ func (dp *dataPartition) ApplySnapshot(peers []raftproto.Peer, iterator raftprot
 			log.LogDebugf("[ApplySnapshot] successful applyId[%v].", dp.applyId)
 			return
 		}
-		log.LogErrorf("[ApplySnapshot]: %s", err.Error())
+		log.LogErrorf("[ApplySnapshot]: err %s", err.Error())
 	}()
 
 	leaderAddr, _ := dp.IsLeader()
-	replicaAddrParts := strings.Split(dp.replicaHosts[0], ":")
-	if strings.TrimSpace(replicaAddrParts[0]) == LocalIP && leaderAddr != "" {
+
+	if len(dp.replicaHosts) > 0 {
+		replicaAddrParts := strings.Split(dp.replicaHosts[0], ":")
+		firstHost = strings.TrimSpace(replicaAddrParts[0])
+	}
+
+	if firstHost == LocalIP && leaderAddr != "" {
 		targetAddr = leaderAddr
-	} else {
+	} else if firstHost != "" {
 		targetAddr = dp.replicaHosts[0]
+	} else {
+		err = fmt.Errorf("[ApplySnapshot]: not expect err firstHost[%s] localIp[%v] raftLeader[%v]",
+			firstHost, LocalIP, leaderAddr)
+		return
 	}
 
 	extentFiles, err = dp.getFileMetas(targetAddr)

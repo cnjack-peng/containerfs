@@ -119,6 +119,8 @@ func (dp *dataPartition) StartSchedule() {
 	truncRaftlogTimer := time.NewTimer(time.Minute * 1)
 	storeAppliedTimer := time.NewTimer(time.Minute * 5)
 
+	log.LogDebugf("[startSchedule] hello dataPartition schedule")
+
 	dumpFunc := func(applyIndex uint64) {
 		log.LogDebugf("[startSchedule] partitionId=%d: applyID=%d", dp.config.PartitionId, applyIndex)
 		if err := dp.storeApplyIndex(applyIndex); err != nil {
@@ -142,19 +144,21 @@ func (dp *dataPartition) StartSchedule() {
 			}
 			select {
 			case <-stopC:
+				log.LogDebugf("[startSchedule] stop partition=%v", dp.partitionId)
 				truncRaftlogTimer.Stop()
 				storeAppliedTimer.Stop()
 				return
 
 			case <-readyChan:
 				for _, idx := range indexes {
-					log.LogDebugf("[startSchedule] partitionId=%d: applyID=%d", dp.config.PartitionId, idx)
+					log.LogDebugf("[startSchedule] ready partition=%v: applyID=%d", dp.config.PartitionId, idx)
 					go dumpFunc(idx)
 				}
 				indexes = nil
 			case applyId := <-dp.storeC:
 				indexes = append(indexes, applyId)
-				log.LogDebugf("[startSchedule] partitionId=%d: applyID=%d", dp.config.PartitionId, applyId)
+				log.LogDebugf("[startSchedule] store apply id partitionId=%d: applyID=%d",
+					dp.config.PartitionId, applyId)
 			case opRaftCode := <-dp.raftC:
 				if dp.raftPartition == nil && opRaftCode == opStartRaft {
 					log.LogWarn("action[startRaft] restart raft partition=%v", dp.partitionId)
@@ -169,7 +173,7 @@ func (dp *dataPartition) StartSchedule() {
 			case <-truncRaftlogTimer.C:
 				dp.getMinAppliedId()
 				if dp.minAppliedId > dp.lastTruncateId { // Has changed
-					log.LogDebugf("[raftLogTruncate] partition=%v minAppId=%v lastTruncateId=%v",
+					log.LogDebugf("[startSchedule] raft log truncate partition=%v minAppId=%v lastTruncateId=%v",
 						dp.partitionId, dp.minAppliedId, dp.lastTruncateId)
 					go dp.raftPartition.Truncate(dp.minAppliedId)
 					dp.lastTruncateId = dp.minAppliedId
@@ -472,14 +476,18 @@ func NewGetAppliedId(partitionId uint32, minAppliedId uint64) (p *Packet) {
 
 // Get all files meta
 func (dp *dataPartition) getMinAppliedId() {
-	//only first host get applied
-	if strings.Split(dp.replicaHosts[0], ":")[0] != LocalIP {
-		return
-	}
 	var (
 		minAppliedId uint64
 		err          error
 	)
+	//only first host get applied
+	if len(dp.replicaHosts) == 0 {
+		return
+	}
+
+	if strings.Split(dp.replicaHosts[0], ":")[0] != LocalIP {
+		return
+	}
 
 	defer func(newMinAppliedId uint64) {
 		if err == nil {
