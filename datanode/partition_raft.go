@@ -116,7 +116,7 @@ func (dp *dataPartition) stopRaft() {
 
 func (dp *dataPartition) StartSchedule() {
 	var isRunning bool
-	truncRaftlogTimer := time.NewTimer(time.Minute * 30)
+	truncRaftlogTimer := time.NewTimer(time.Minute * 1)
 	storeAppliedTimer := time.NewTimer(time.Minute * 5)
 
 	dumpFunc := func(applyIndex uint64) {
@@ -169,6 +169,8 @@ func (dp *dataPartition) StartSchedule() {
 			case <-truncRaftlogTimer.C:
 				dp.getMinAppliedId()
 				if dp.minAppliedId > dp.lastTruncateId { // Has changed
+					log.LogDebugf("[raftLogTruncate] partition=%v minAppId=%v lastTruncateId=%v",
+						dp.partitionId, dp.minAppliedId, dp.lastTruncateId)
 					go dp.raftPartition.Truncate(dp.minAppliedId)
 					dp.lastTruncateId = dp.minAppliedId
 				}
@@ -518,6 +520,7 @@ func (dp *dataPartition) getMinAppliedId() {
 		}
 
 		remoteAppliedId := binary.BigEndian.Uint64(p.Data)
+		log.LogDebugf("[getMinAppliedId] remote appliedId=%v curAppliedId=%v", remoteAppliedId, minAppliedId)
 		if remoteAppliedId < minAppliedId && remoteAppliedId != 0 {
 			minAppliedId = remoteAppliedId
 		}

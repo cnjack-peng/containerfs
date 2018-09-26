@@ -532,6 +532,9 @@ func (s *DataNode) handleGetAppliedId(pkg *Packet) {
 
 	//return current appliedId
 	appliedId := pkg.DataPartition.GetAppliedId()
+
+	log.LogDebugf("[getMinAppliedId] handleGetAppliedId minAppId=%v curAppId=%v", minAppliedId, appliedId)
+
 	buf := make([]byte, 8)
 	binary.BigEndian.PutUint64(buf, appliedId)
 	pkg.PackOkWithBody(buf)

@@ -34,8 +34,8 @@ import (
 func (dp *dataPartition) Apply(command []byte, index uint64) (resp interface{}, err error) {
 	opItem := &rndWrtOpItem{}
 	defer func(index uint64) {
+		log.LogDebugf("[randomWrite] partition=%v oldApplied=%v new=%v",dp.partitionId, dp.applyId, index)
 		dp.uploadApplyID(index)
-		log.LogDebugf("[randomWrite] old applied %v new %v",dp.partitionId, index)
 		if err != nil {
 			resp = proto.OpExistErr
 			dp.repairC <- opItem.extentId
