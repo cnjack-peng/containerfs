@@ -107,6 +107,7 @@ func (dp *dataPartition) StartRaft() (err error) {
 
 func (dp *dataPartition) stopRaft() {
 	if dp.raftPartition != nil {
+		log.LogErrorf("[FATAL] stop raft partition=%v", dp.partitionId)
 		dp.raftPartition.Stop()
 		dp.raftPartition = nil
 	}
@@ -156,13 +157,13 @@ func (dp *dataPartition) StartSchedule() {
 				log.LogDebugf("[startSchedule] partitionId=%d: applyID=%d", dp.config.PartitionId, applyId)
 			case opRaftCode := <-dp.raftC:
 				if dp.raftPartition == nil && opRaftCode == opStartRaft {
-					log.LogWarn("action[RaftOp] restart raft partition=%v", dp.partitionId)
+					log.LogWarn("action[startRaft] restart raft partition=%v", dp.partitionId)
 					if err := dp.StartRaft(); err != nil {
 						panic("start raft error")
 					}
 				}
 			case extentId := <-dp.repairC:
-				dp.ApplyErrRepair(extentId)
+				dp.applyErrRepair(extentId)
 				dp.raftC <- opStartRaft
 
 			case <-truncRaftlogTimer.C:
@@ -365,7 +366,8 @@ func (dp *dataPartition) ExtentRepair(extentFiles []*storage.FileInfo) {
 		extentFile := extentFiles[i]
 		addFile := &storage.FileInfo{Source: extentFile.Source, FileId: extentFile.FileId, Size: extentFile.Size, Inode: extentFile.Inode}
 		mf.NeedAddExtentsTasks = append(mf.NeedAddExtentsTasks, addFile)
-		log.LogInfof("action[ExtentRepair] partition=%v addFile[%v].", dp.partitionId, addFile)
+		log.LogDebugf("action[ExtentRepair] partition=%v extent [%v_%v] addFile[%v].",
+			dp.partitionId, dp.partitionId, extentFile.FileId, addFile)
 	}
 
 	dp.MergeRepair(mf)
@@ -375,7 +377,7 @@ func (dp *dataPartition) ExtentRepair(extentFiles []*storage.FileInfo) {
 		dp.partitionId, (finishTime-startTime)/int64(time.Millisecond))
 }
 
-func (dp *dataPartition) ApplyErrRepair(extentId uint64) {
+func (dp *dataPartition) applyErrRepair(extentId uint64) {
 	extentFiles := make([]*storage.FileInfo, 0)
 	leaderAddr, isLeader := dp.IsLeader()
 	dp.stopRaft()
@@ -397,12 +399,14 @@ func (dp *dataPartition) ApplyErrRepair(extentId uint64) {
 		if err != nil {
 			log.LogErrorf("action[ExtentRepair] err: %v", err)
 		}
-		log.LogInfof("action[ExtentRepair] leader repair follower partition=%v addFile[%v].", dp.partitionId, addFile)
+		log.LogDebugf("action[ExtentRepair] leader repair follower partition=%v extent [%v_%v] addFile[%v].",
+			dp.partitionId, dp.partitionId, extentId, addFile)
 
 	} else if leaderAddr != "" {
 		// If follower apply error, delete local extent and repair from leader
 		dp.extentStore.DeleteDirtyExtent(extentId)
-		log.LogWarnf("action[ExtentRepair] Delete follower dirty extent [%v_%v]", dp.partitionId, extentId)
+		log.LogErrorf("action[ExtentRepair] Delete follower dirty partition=%v extent [%v_%v]",
+			dp.partitionId, dp.partitionId, extentId)
 
 		// Repair local extent
 		extentInfo.Source = leaderAddr

@@ -154,18 +154,18 @@ func (dp *dataPartition) RandomPartitionReadCheck(request *Packet, connect net.C
 	_, ok := dp.IsLeader()
 	if !ok {
 		err = storage.ErrNotLeader
-		log.LogErrorf("[randomWrite] read ErrorNotLeader partition=%v", dp.partitionId)
+		log.LogErrorf("[readCheck] read ErrorNotLeader partition=%v", dp.partitionId)
 		return
 	}
 
 	if dp.applyId+1 < dp.raftPartition.CommittedIndex() {
 		//err = storage.ErrorAgain
-		log.LogErrorf("[randomWrite] read ErrorAgain partition=%v dp applyId=%v committedId=%v raftApplied=%v",
+		log.LogErrorf("[readCheck] read ErrorAgain partition=%v dp applyId=%v committedId=%v raftApplied=%v",
 			dp.partitionId, dp.applyId, dp.raftPartition.CommittedIndex(), dp.raftPartition.AppliedIndex())
 		//return
 	}
 
-	log.LogDebugf("[randomWrite] read check pass! dp=%v applied=%v committed=%v",
+	log.LogDebugf("[readCheck] read check pass! partition=%v applied=%v committed=%v",
 		dp.partitionId, dp.applyId, dp.raftPartition.CommittedIndex())
 	return
 }
