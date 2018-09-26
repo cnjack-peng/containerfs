@@ -56,6 +56,11 @@ func (dp *dataPartition) Apply(command []byte, index uint64) (resp interface{}, 
 		log.LogDebugf("[randomWrite] apply %v_%v_%v_%v ", dp.ID(), opItem.extentId, opItem.offset, opItem.size)
 		for i := 0; i < maxApplyErrRetry; i++ {
 			err = dp.GetExtentStore().Write(opItem.extentId, opItem.offset, opItem.size, opItem.data, opItem.crc)
+			if err != nil {
+				if ignore := dp.checkWriteErrs(err.Error()); ignore {
+					err = nil
+				}
+			}
 			dp.addDiskErrs(err, WriteFlag)
 			if err == nil {
 				break

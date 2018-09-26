@@ -24,6 +24,7 @@ import (
 
 	"github.com/tiglabs/containerfs/util/log"
 	"github.com/tiglabs/containerfs/storage"
+	"strings"
 )
 
 type RndWrtCmdItem struct {
@@ -115,6 +116,18 @@ func (dp *dataPartition) RandomWriteSubmit(pkg *Packet) (err error) {
 	pkg.ResultCode = resp.(uint8)
 	log.LogDebugf("[randomWriteDebug] Submit raft: response status = %v.", pkg.GetResultMesg())
 	return
+}
+
+func (dp *dataPartition) checkWriteErrs(errMsg string) (ignore bool) {
+	// file has deleted when raft log apply
+	if strings.Contains(errMsg, storage.ErrorFileNotFound.Error()) ||
+		strings.Contains(errMsg, storage.ErrorObjNotFound.Error()) ||
+		strings.Contains(errMsg, storage.ErrorExtentNotFound.Error()) ||
+		strings.Contains(errMsg, storage.ErrorHasDelete.Error()){
+		log.LogDebugf("[randomWrite] ignore write err %v.", errMsg)
+		return true
+	}
+	return false
 }
 
 func (dp *dataPartition) addDiskErrs(err error, flag uint8) {
