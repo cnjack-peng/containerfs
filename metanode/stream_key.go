@@ -81,17 +81,25 @@ func (sk *StreamKey) MarshalJSON() (data []byte, err error) {
 }
 
 func (sk *StreamKey) Put(key BtreeItem) (items []BtreeItem) {
+	var delItems []BtreeItem
 	ext := key.(*proto.ExtentKey)
 	lessFileOffset := ext.FileOffset + uint64(ext.Size)
 	tx := sk.Extents.BeginTx()
 	tx.TxAscendRange(key, &proto.ExtentKey{FileOffset: lessFileOffset},
 		func(item BtreeItem) bool {
-			items = append(items, item)
+			delItems = append(delItems, item)
 			return true
 		})
+
 	// should Delete Items
-	for _, item := range items {
+	for _, item := range delItems {
+		delKey := item.(*proto.ExtentKey)
+		if delKey.PartitionId == ext.PartitionId && delKey.ExtentId == ext.
+			ExtentId {
+			continue
+		}
 		tx.TxDelete(item)
+		items = append(items, item)
 	}
 	// add Item
 	tx.TxReplaceOrInsert(key)
