@@ -116,7 +116,7 @@ func (dp *dataPartition) stopRaft() {
 
 func (dp *dataPartition) StartSchedule() {
 	var isRunning bool
-	truncRaftlogTimer := time.NewTimer(time.Minute * 1)
+	truncRaftlogTimer := time.NewTimer(time.Minute * 10)
 	storeAppliedTimer := time.NewTimer(time.Minute * 5)
 
 	log.LogDebugf("[startSchedule] hello dataPartition schedule")
@@ -181,9 +181,11 @@ func (dp *dataPartition) StartSchedule() {
 					go dp.raftPartition.Truncate(dp.minAppliedId)
 					dp.lastTruncateId = dp.minAppliedId
 				}
+				truncRaftlogTimer.Reset(time.Minute * 1)
 
 			case <-storeAppliedTimer.C:
 				dp.storeC <- dp.applyId
+				storeAppliedTimer.Reset(time.Minute * 5)
 			}
 		}
 	}(dp.stopC)
