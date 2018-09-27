@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/tiglabs/containerfs/util/config"
 	"io/ioutil"
 	"os"
 	"bytes"
@@ -43,6 +42,7 @@ const (
 	opRandomWrite   uint32 = iota
 )
 
+var path string
 
 func randomWriteUnmarshal(raw []byte) (result *rndWrtItem, err error) {
 	var opItem rndWrtItem
@@ -73,18 +73,16 @@ func randomWriteUnmarshal(raw []byte) (result *rndWrtItem, err error) {
 func main() {
 	fmt.Println("Read raft wal record")
 	var (
-		confFile   = flag.String("c", "", "config file path")
 		fileOffset uint64
 		dataSize   uint64
 		dataString string
 	    randWrite *rndWrtItem
 	)
 
+	flag.StringVar(&path, "p", "0000000000000001-0000000000000001.log", "path")
 	flag.Parse()
-	cfg := config.LoadConfigFile(*confFile)
-	fileName := cfg.GetString("filename")
 
-	f, err := os.Open(fileName)
+	f, err := os.Open(path)
 	if err != nil {
 		fmt.Println("open wal failed ", err)
 		return
