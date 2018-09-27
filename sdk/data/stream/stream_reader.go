@@ -74,7 +74,7 @@ func (stream *Streamer) read(data []byte, offset int, size int) (total int, err 
 	}
 	requests := stream.extents.PrepareRequest(offset, size, data)
 	filesize, _ := stream.extents.Size()
-	log.LogDebugf("stream read: requests(%v) filesize(%v)", requests, filesize)
+	log.LogDebugf("stream read: ino(%v) requests(%v) filesize(%v)", stream.inode, requests, filesize)
 	for _, req := range requests {
 		if req.ExtentKey == nil {
 			for i, _ := range req.Data {
@@ -90,14 +90,14 @@ func (stream *Streamer) read(data []byte, offset int, size int) (total int, err 
 
 			// Reading a hole, just fill zero
 			total += req.Size
-			log.LogDebugf("Stream read hole: req(%v) total(%v)", req, total)
+			log.LogDebugf("Stream read hole: ino(%v) req(%v) total(%v)", stream.inode, req, total)
 		} else {
 			reader, err := stream.GetExtentReader(req.ExtentKey)
 			if err != nil {
 				break
 			}
 			readBytes, err = reader.Read(req)
-			log.LogDebugf("Stream read: req(%v) readBytes(%v) err(%v)", req, readBytes, err)
+			log.LogDebugf("Stream read: ino(%v) req(%v) readBytes(%v) err(%v)", stream.inode, req, readBytes, err)
 			total += readBytes
 			if err != nil || readBytes < req.Size {
 				break

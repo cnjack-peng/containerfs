@@ -48,8 +48,10 @@ func (reader *ExtentReader) Read(req *ExtentRequest) (readBytes int, err error) 
 	offset := req.FileOffset - int(reader.key.FileOffset)
 	size := req.Size
 
-	reqPacket := NewStreamReadPacket(reader.key, offset, size)
+	reqPacket := NewStreamReadPacket(reader.key, offset, size, reader.inode, req.FileOffset)
 	sc := NewStreamConn(reader.dp)
+
+	log.LogDebugf("ExtentReader Read enter: size(%v) req(%v) reqPacket(%v)", size, req, reqPacket)
 
 	err = sc.Send(reqPacket, func(conn *net.TCPConn) (error, bool) {
 		readBytes = 0
@@ -58,7 +60,6 @@ func (reader *ExtentReader) Read(req *ExtentRequest) (readBytes int, err error) 
 			bufSize := util.Min(util.ReadBlockSize, size-readBytes)
 			replyPacket.Data = req.Data[readBytes : readBytes+bufSize]
 			e := replyPacket.ReadFromConnStream(conn, proto.ReadDeadlineTime)
-			log.LogDebugf("ExtentReader Read: Read from conn err(%v)", e)
 			if e != nil {
 				return errors.Annotatef(e, "Extent Reader Read: failed to read from connect"), false
 			}
@@ -83,6 +84,8 @@ func (reader *ExtentReader) Read(req *ExtentRequest) (readBytes int, err error) 
 	if err != nil {
 		log.LogErrorf("Extent Reader Read: err(%v) req(%v) reqPacket(%v)", err, req, reqPacket)
 	}
+
+	log.LogDebugf("ExtentReader Read exit: req(%v) reqPacket(%v) readBytes(%v) err(%v)", req, reqPacket, readBytes, err)
 	return
 }
 

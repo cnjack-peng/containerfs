@@ -51,8 +51,9 @@ func (sc *StreamConn) Send(req *Packet, getReply GetReplyFunc) (err error) {
 			return
 		}
 		log.LogWarnf("StreamConn Send: err(%v)", err)
+		time.Sleep(StreamSendSleepInterval)
 	}
-	return errors.New(fmt.Sprintf("StreamConn Send: retried %v times and still failed, sc(%v) req(%v)", StreamSendMaxRetry, sc, req))
+	return errors.New(fmt.Sprintf("StreamConn Send: retried %v times and still failed, sc(%v) reqPacket(%v)", StreamSendMaxRetry, sc, req))
 }
 
 func (sc *StreamConn) sendToPartition(req *Packet, getReply GetReplyFunc) (err error) {
@@ -63,7 +64,7 @@ func (sc *StreamConn) sendToPartition(req *Packet, getReply GetReplyFunc) (err e
 			StreamConnPool.Put(conn, false)
 			return
 		}
-		log.LogWarnf("sendToPartition: curr addr failed, addr(%v) req(%v) err(%v)", sc.currAddr, req, err)
+		log.LogWarnf("sendToPartition: curr addr failed, addr(%v) reqPacket(%v) err(%v)", sc.currAddr, req, err)
 		StreamConnPool.Put(conn, true)
 		if err != NotLeaderError {
 			return
@@ -74,7 +75,7 @@ func (sc *StreamConn) sendToPartition(req *Packet, getReply GetReplyFunc) (err e
 		log.LogWarnf("sendToPartition: try addr(%v) req(%v)", addr, req)
 		conn, err = StreamConnPool.Get(addr)
 		if err != nil {
-			log.LogWarnf("sendToPartition: failed to get connection to addr(%v) req(%v) err(%v)", addr, req, err)
+			log.LogWarnf("sendToPartition: failed to get connection to addr(%v) reqPacket(%v) err(%v)", addr, req, err)
 			continue
 		}
 		sc.currAddr = addr
@@ -88,12 +89,12 @@ func (sc *StreamConn) sendToPartition(req *Packet, getReply GetReplyFunc) (err e
 			return
 		}
 	}
-	return errors.New(fmt.Sprintf("sendToPatition Failed: sc(%v) req(%v)", sc, req))
+	return errors.New(fmt.Sprintf("sendToPatition Failed: sc(%v) reqPacket(%v)", sc, req))
 }
 
 func (sc *StreamConn) sendToConn(conn *net.TCPConn, req *Packet, getReply GetReplyFunc) (err error) {
 	for i := 0; i < StreamSendMaxRetry; i++ {
-		log.LogDebugf("sendToConn: send to addr(%v), req(%v)", sc.currAddr, req)
+		log.LogDebugf("sendToConn: send to addr(%v), reqPacket(%v)", sc.currAddr, req)
 		err = req.WriteToConn(conn)
 		if err != nil {
 			msg := fmt.Sprintf("sendToConn: failed to write to addr(%v) err(%v)", sc.currAddr, err)
@@ -105,7 +106,7 @@ func (sc *StreamConn) sendToConn(conn *net.TCPConn, req *Packet, getReply GetRep
 		err, again = getReply(conn)
 		if !again {
 			if err != nil {
-				log.LogWarnf("sendToConn: getReply error and RETURN, addr(%v) req(%v) err(%v)", sc.currAddr, req, err)
+				log.LogWarnf("sendToConn: getReply error and RETURN, addr(%v) reqPacket(%v) err(%v)", sc.currAddr, req, err)
 			}
 			break
 		}
@@ -114,6 +115,6 @@ func (sc *StreamConn) sendToConn(conn *net.TCPConn, req *Packet, getReply GetRep
 		time.Sleep(StreamSendSleepInterval)
 	}
 
-	log.LogDebugf("sendToConn exit: send to addr(%v) req(%v) err(%v)", sc.currAddr, req, err)
+	log.LogDebugf("sendToConn exit: send to addr(%v) reqPacket(%v) err(%v)", sc.currAddr, req, err)
 	return
 }

@@ -194,7 +194,7 @@ func (sw *StreamWriter) write(data []byte, offset, size int) (total int, err err
 	log.LogDebugf("StreamWriter write: ino(%v) offset(%v) size(%v)", sw.Inode, offset, size)
 
 	requests := sw.stream.extents.PrepareRequest(offset, size, data)
-	log.LogDebugf("StreamWriter write: prepared requests(%v)", requests)
+	log.LogDebugf("StreamWriter write: ino(%v) prepared requests(%v)", sw.Inode, requests)
 	for _, req := range requests {
 		var writeSize int
 		if req.ExtentKey != nil {
@@ -203,15 +203,16 @@ func (sw *StreamWriter) write(data []byte, offset, size int) (total int, err err
 			writeSize, err = sw.doWrite(req.Data, req.FileOffset, req.Size)
 		}
 		if err != nil {
-			log.LogErrorf("StreamWriter write: err(%v)", err)
+			log.LogErrorf("StreamWriter write: ino(%v) err(%v)", sw.Inode, err)
 			break
 		}
 		total += writeSize
 	}
 	if filesize, _ := sw.stream.extents.Size(); offset+total > filesize {
 		sw.stream.extents.SetSize(uint64(offset + total))
+		log.LogDebugf("StreamWriter write: ino(%v) filesize changed to (%v)", sw.Inode, offset+total)
 	}
-	log.LogDebugf("StreamWriter write: done total(%v) err(%v)", total, err)
+	log.LogDebugf("StreamWriter write: ino(%v) done total(%v) err(%v)", sw.Inode, total, err)
 	return
 }
 
@@ -229,7 +230,7 @@ func (sw *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error) {
 			fileEnd := util.Min(kernelOffset+packSize, offset+size)
 			copy(currPacket.Data[offset-kernelOffset:fileEnd-kernelOffset], req.Data[:fileEnd-offset])
 			total += (fileEnd - offset)
-			log.LogDebugf("doRewrite: rewrite current writer from (%v) to (%v)", offset, fileEnd)
+			log.LogDebugf("doRewrite: ino(%v) rewrite current writer from (%v) to (%v)", sw.Inode, offset, fileEnd)
 		}
 	}
 
@@ -238,24 +239,26 @@ func (sw *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error) {
 	}
 
 	if dp, err = gDataWrapper.GetDataPartition(req.ExtentKey.PartitionId); err != nil {
-		errors.Annotatef(err, "doRewrite: failed to get datapartition, ek(%v)", req.ExtentKey)
+		errors.Annotatef(err, "doRewrite: ino(%v) failed to get datapartition, ek(%v)", sw.Inode, req.ExtentKey)
 		return
 	}
 
 	sc := NewStreamConn(dp)
 
 	for total < size {
-		reqPacket := NewWritePacket(dp, req.ExtentKey.ExtentId, offset-ekOffset+total, offset, true)
+		reqPacket := NewWritePacket(dp, req.ExtentKey.ExtentId, offset-ekOffset+total, sw.Inode, offset, true)
 		packSize := util.Min(size-total, util.BlockSize)
 		copy(reqPacket.Data[:packSize], req.Data[total:total+packSize])
 		reqPacket.Size = uint32(packSize)
 		reqPacket.Crc = crc32.ChecksumIEEE(reqPacket.Data[:packSize])
 
+		log.LogDebugf("doRewrite: packSize(%v) req(%v) reqPacket(%v)", packSize, req, reqPacket)
+
 		replyPacket := new(Packet)
 		err = sc.Send(reqPacket, func(conn *net.TCPConn) (error, bool) {
 			e := replyPacket.ReadFromConn(conn, proto.ReadDeadlineTime)
 			if e != nil {
-				return errors.Annotatef(e, "Stream Writer doRewrite: failed to read from connect"), false
+				return errors.Annotatef(e, "Stream Writer doRewrite: ino(%v) failed to read from connect", sw.Inode), false
 			}
 
 			if replyPacket.ResultCode == proto.OpAgain {
@@ -269,12 +272,12 @@ func (sw *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error) {
 		})
 
 		if err != nil || replyPacket.ResultCode != proto.OpOk {
-			err = errors.Annotatef(err, "doRewrite failed: req(%v) reqPacket(%v) replyPacket(%v)", req, reqPacket, replyPacket)
+			err = errors.Annotatef(err, "doRewrite failed or NOK: ino(%v) req(%v) replyPacket(%v)", sw.Inode, req, replyPacket)
 			break
 		}
 
 		if !reqPacket.IsEqualWriteReply(replyPacket) || reqPacket.Crc != replyPacket.Crc {
-			err = errors.New(fmt.Sprintf("doRewrite: is not the corresponding reply, req(%v) reqPacket(%v) replyPacket(%v)", req, reqPacket, replyPacket))
+			err = errors.New(fmt.Sprintf("doRewrite: is not the corresponding reply, ino(%v) req(%v) replyPacket(%v)", sw.Inode, req, replyPacket))
 			break
 		}
 

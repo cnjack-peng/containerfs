@@ -29,16 +29,17 @@ import (
 type Packet struct {
 	proto.Packet
 	fillBytes    uint32
+	inode        uint64
 	kernelOffset int
 	orgSize      uint32
 	orgData      []byte
 }
 
 func (p *Packet) String() string {
-	return fmt.Sprintf("ReqID(%v) Op(%v) PartitionID(%v) FileID(%v) Offset((%v) CRC(%v)", p.ReqID, p.GetOpMsg(), p.PartitionID, p.FileID, p.Offset, p.Crc)
+	return fmt.Sprintf("ReqID(%v) Op(%v) Inode(%v) FileOffset(%v) Size(%v) PartitionID(%v) FileID(%v) Offset((%v) CRC(%v) ResultCode(%v)", p.ReqID, p.GetOpMsg(), p.inode, p.kernelOffset, p.Size, p.PartitionID, p.FileID, p.Offset, p.Crc, p.GetResultMesg())
 }
 
-func NewWritePacket(dp *wrapper.DataPartition, extentId uint64, offset int, kernelOffset int, isRandom bool) (p *Packet) {
+func NewWritePacket(dp *wrapper.DataPartition, extentId uint64, offset int, inode uint64, kernelOffset int, isRandom bool) (p *Packet) {
 	p = new(Packet)
 	p.PartitionID = dp.PartitionID
 	p.Magic = proto.ProtoMagic
@@ -55,6 +56,7 @@ func NewWritePacket(dp *wrapper.DataPartition, extentId uint64, offset int, kern
 	} else {
 		p.Opcode = proto.OpWrite
 	}
+	p.inode = inode
 	p.kernelOffset = kernelOffset
 	p.Data, _ = proto.Buffers.Get(util.BlockSize)
 
@@ -76,7 +78,7 @@ func NewReadPacket(key *proto.ExtentKey, offset, size int) (p *Packet) {
 	return
 }
 
-func NewStreamReadPacket(key *proto.ExtentKey, offset, size int) (p *Packet) {
+func NewStreamReadPacket(key *proto.ExtentKey, offset, size int, inode uint64, fileOffset int) (p *Packet) {
 	p = new(Packet)
 	p.FileID = key.ExtentId
 	p.PartitionID = key.PartitionId
@@ -87,6 +89,8 @@ func NewStreamReadPacket(key *proto.ExtentKey, offset, size int) (p *Packet) {
 	p.StoreMode = proto.ExtentStoreMode
 	p.ReqID = proto.GetReqID()
 	p.Nodes = 0
+	p.inode = inode
+	p.kernelOffset = fileOffset
 
 	return
 }
