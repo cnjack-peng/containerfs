@@ -500,18 +500,18 @@ func (dp *dataPartition) getMinAppliedId() {
 		return
 	}
 
-	defer func(newMinAppliedId uint64) {
+	defer func() {
 		if err == nil {
 			log.LogDebugf("[getMinAppliedId] partition=%v success oldAppId=%v newAppId=%v localAppId=%v",
-				dp.partitionId, dp.minAppliedId, newMinAppliedId, dp.applyId)
+				dp.partitionId, dp.minAppliedId, minAppliedId, dp.applyId)
 			//success maybe update the minAppliedId
-			dp.minAppliedId = newMinAppliedId
+			dp.minAppliedId = minAppliedId
 		} else {
 			//do nothing
 			log.LogErrorf("[getMinAppliedId] partition=%v newAppId=%v localAppId=%v err %v",
-				dp.partitionId, newMinAppliedId, dp.applyId, err)
+				dp.partitionId, minAppliedId, dp.applyId, err)
 		}
-	}(minAppliedId)
+	}()
 
 	// send the last minAppliedId and get current appliedId
 	p := NewGetAppliedId(dp.partitionId, dp.minAppliedId)
