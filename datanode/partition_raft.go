@@ -487,38 +487,45 @@ func (dp *dataPartition) getMinAppliedId() {
 		err          error
 	)
 
-	//only first host get applied
-	if len(dp.replicaHosts) > 0 {
-		replicaAddrParts := strings.Split(dp.replicaHosts[0], ":")
-		firstHost := strings.TrimSpace(replicaAddrParts[0])
-		if firstHost != LocalIP {
-			log.LogDebugf("[getMinAppliedId] partition=%v notHostLeader firstHost[%v] localIp[%v] replicHosts[0]=[%v]",
-				dp.partitionId, firstHost, LocalIP, dp.replicaHosts[0])
-			return
-		}
-	} else {
-		log.LogDebugf("[getMinAppliedId] partition=%v firstHost is nil localIp[%v]",	dp.partitionId, LocalIP)
+	//only leader get applied
+	leaderAddr, isLeader := dp.IsLeader()
+	if !isLeader || leaderAddr == "" {
+		log.LogDebugf("[getMinAppliedId] partition=%v notRaftLeader leaderAddr[%v] localIp[%v]",
+			dp.partitionId, leaderAddr, LocalIP)
+		return
+	}
+
+	if dp.applyId == 0 {
+		log.LogDebugf("[getMinAppliedId] partition=%v leader no apply. commit=%v", dp.raftPartition.CommittedIndex())
 		return
 	}
 
 	defer func(newMinAppliedId uint64) {
 		if err == nil {
-			log.LogDebugf("[getMinAppliedId] partition=%v success old minAppId=%v newAppId=%v",
-				dp.partitionId, dp.minAppliedId, newMinAppliedId)
+			log.LogDebugf("[getMinAppliedId] partition=%v success oldAppId=%v newAppId=%v localAppId=%v",
+				dp.partitionId, dp.minAppliedId, newMinAppliedId, dp.applyId)
 			//success maybe update the minAppliedId
 			dp.minAppliedId = newMinAppliedId
 		} else {
 			//do nothing
-			log.LogErrorf("[getMinAppliedId] partition=%v newAppId=%v err %v",
-				dp.partitionId, newMinAppliedId, err)
+			log.LogErrorf("[getMinAppliedId] partition=%v newAppId=%v localAppId=%v err %v",
+				dp.partitionId, newMinAppliedId, dp.applyId, err)
 		}
 	}(minAppliedId)
 
 	// send the last minAppliedId and get current appliedId
 	p := NewGetAppliedId(dp.partitionId, dp.minAppliedId)
 	minAppliedId = dp.applyId
-	for i := 1; i < len(dp.replicaHosts); i++ {
+	for i := 0; i < len(dp.replicaHosts); i++ {
 		var conn *net.TCPConn
+		leaderAddrParts := strings.Split(leaderAddr, ":")
+		leader := strings.TrimSpace(leaderAddrParts[0])
+		if leader == LocalIP {
+			log.LogDebugf("[getMinAppliedId] partition=%v lead not send msg. localIp[%v] leader=[%v]",
+				dp.partitionId, LocalIP, leaderAddr)
+			continue
+		}
+
 		target := dp.replicaHosts[i]
 		conn, err = gConnPool.Get(target) //get remote connect
 		if err != nil {
@@ -540,7 +547,10 @@ func (dp *dataPartition) getMinAppliedId() {
 		}
 
 		remoteAppliedId := binary.BigEndian.Uint64(p.Data)
-		log.LogDebugf("[getMinAppliedId] remote appliedId=%v curAppliedId=%v", remoteAppliedId, minAppliedId)
+
+		log.LogDebugf("[getMinAppliedId] partition=%v remoteAppliedId=%v curAppliedId=%v",
+			dp.partitionId, remoteAppliedId, minAppliedId)
+
 		if remoteAppliedId < minAppliedId && remoteAppliedId != 0 {
 			minAppliedId = remoteAppliedId
 		}
