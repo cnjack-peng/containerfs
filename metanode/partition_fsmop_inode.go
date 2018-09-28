@@ -189,8 +189,8 @@ func (mp *metaPartition) extentsTruncate(ino *Inode) (resp *ResponseInode) {
 	resp = NewResponseInode()
 	resp.Status = proto.OpOk
 	isFind := false
-	var delExtents []BtreeItem
 	mp.inodeTree.Find(ino, func(item BtreeItem) {
+		var delExtents []BtreeItem
 		isFind = true
 		i := item.(*Inode)
 		if proto.IsDir(i.Type) {
@@ -201,9 +201,6 @@ func (mp *metaPartition) extentsTruncate(ino *Inode) (resp *ResponseInode) {
 			resp.Status = proto.OpNotExistErr
 			return
 		}
-		i.Size = ino.Size
-		i.ModifyTime = ino.ModifyTime
-		i.Generation++
 		i.Extents.Extents.AscendGreaterOrEqual(&proto.
 			ExtentKey{FileOffset: ino.Size},
 			func(item BtreeItem) bool {
@@ -217,13 +214,15 @@ func (mp *metaPartition) extentsTruncate(ino *Inode) (resp *ResponseInode) {
 		}
 		// check max
 		extItem := i.Extents.Max()
-		if extItem == nil {
-			return
+		if extItem != nil {
+			ext := extItem.(*proto.ExtentKey)
+			if (ext.FileOffset + uint64(ext.Size)) > ino.Size {
+				ext.Size = uint32(ino.Size - ext.FileOffset)
+			}
 		}
-		ext := extItem.(*proto.ExtentKey)
-		if n := ino.Size - ext.FileOffset; ext.Size > uint32(n) {
-			ext.Size = uint32(n)
-		}
+		i.Size = ino.Size
+		i.ModifyTime = ino.ModifyTime
+		i.Generation++
 	})
 	if !isFind {
 		resp.Status = proto.OpNotExistErr
