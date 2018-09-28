@@ -129,28 +129,16 @@ func (client *ExtentClient) CloseStream(inode uint64) error {
 	return nil
 }
 
-func (client *ExtentClient) GetStreamer(inode uint64) *Streamer {
-	client.streamerLock.Lock()
-	defer client.streamerLock.Unlock()
-	stream, ok := client.streamers[inode]
-	if !ok {
+func (client *ExtentClient) RefreshExtentsCache(inode uint64) error {
+	stream := client.getStreamer(inode)
+	if stream == nil {
 		return nil
 	}
-	return stream
-}
-
-func (client *ExtentClient) GetStreamWriter(inode uint64) *StreamWriter {
-	client.streamerLock.Lock()
-	defer client.streamerLock.Unlock()
-	stream, ok := client.streamers[inode]
-	if !ok {
-		return nil
-	}
-	return stream.writer
+	return stream.GetExtents()
 }
 
 func (client *ExtentClient) GetFileSize(inode uint64) (size int, gen uint64) {
-	stream := client.GetStreamer(inode)
+	stream := client.getStreamer(inode)
 	if stream == nil {
 		return
 	}
@@ -158,7 +146,7 @@ func (client *ExtentClient) GetFileSize(inode uint64) (size int, gen uint64) {
 }
 
 func (client *ExtentClient) Write(inode uint64, offset int, data []byte) (write int, err error) {
-	stream := client.GetStreamWriter(inode)
+	stream := client.getStreamWriter(inode)
 	if stream == nil {
 		prefix := fmt.Sprintf("inodewrite %v_%v_%v", inode, offset, len(data))
 		return 0, fmt.Errorf("Prefix(%v) cannot init write stream", prefix)
@@ -184,7 +172,7 @@ func (client *ExtentClient) Write(inode uint64, offset int, data []byte) (write 
 }
 
 func (client *ExtentClient) Flush(inode uint64) error {
-	stream := client.GetStreamWriter(inode)
+	stream := client.getStreamWriter(inode)
 	if stream == nil {
 		return nil
 	}
@@ -196,12 +184,12 @@ func (client *ExtentClient) Read(inode uint64, data []byte, offset int, size int
 		return
 	}
 
-	stream := client.GetStreamer(inode)
+	stream := client.getStreamer(inode)
 	if stream == nil {
 		return
 	}
 
-	writer := client.GetStreamWriter(inode)
+	writer := client.getStreamWriter(inode)
 	if writer != nil {
 		if err = writer.Flush(); err != nil {
 			return
@@ -210,4 +198,24 @@ func (client *ExtentClient) Read(inode uint64, data []byte, offset int, size int
 
 	read, err = stream.read(data, offset, size)
 	return
+}
+
+func (client *ExtentClient) getStreamer(inode uint64) *Streamer {
+	client.streamerLock.Lock()
+	defer client.streamerLock.Unlock()
+	stream, ok := client.streamers[inode]
+	if !ok {
+		return nil
+	}
+	return stream
+}
+
+func (client *ExtentClient) getStreamWriter(inode uint64) *StreamWriter {
+	client.streamerLock.Lock()
+	defer client.streamerLock.Unlock()
+	stream, ok := client.streamers[inode]
+	if !ok {
+		return nil
+	}
+	return stream.writer
 }

@@ -200,18 +200,19 @@ func (f *File) Fsync(ctx context.Context, req *fuse.FsyncRequest) (err error) {
 func (f *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
 	ino := f.inode.ino
 	start := time.Now()
-	if req.Valid.Size() && req.Size == 0 {
-		err := f.super.mw.Truncate(ino)
+	if req.Valid.Size() {
+		err := f.super.mw.Truncate(ino, req.Size)
 		if err != nil {
-			log.LogErrorf("Setattr: truncate ino(%v) err(%v)", ino, err)
+			log.LogErrorf("Setattr: truncate ino(%v) size(%v) err(%v)", ino, req.Size, err)
 			return ParseError(err)
 		}
 		f.super.ic.Delete(ino)
+		f.super.ec.RefreshExtentsCache(ino)
 	}
 
 	inode, err := f.super.InodeGet(ino)
 	if err != nil {
-		log.LogErrorf("Setattr: ino(%v) err(%v)", ino, err)
+		log.LogErrorf("Setattr: InodeGet failed, ino(%v) err(%v)", ino, err)
 		return ParseError(err)
 	}
 

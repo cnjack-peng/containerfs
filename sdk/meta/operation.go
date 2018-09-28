@@ -571,20 +571,19 @@ func (mw *MetaWrapper) getExtents(mp *MetaPartition, inode uint64) (status int, 
 	return statusOK, resp.Generation, resp.Size, resp.Extents, nil
 }
 
-func (mw *MetaWrapper) truncate(mp *MetaPartition, inode uint64) (status int, err error) {
+func (mw *MetaWrapper) truncate(mp *MetaPartition, inode, size uint64) (status int, err error) {
 	req := &proto.TruncateRequest{
 		VolName:     mw.volname,
 		PartitionID: mp.PartitionID,
 		Inode:       inode,
-		FileOffset:  0,
-		Size:        0,
+		Size:        size,
 	}
 
 	packet := proto.NewPacket()
 	packet.Opcode = proto.OpMetaTruncate
 	err = packet.MarshalData(req)
 	if err != nil {
-		log.LogErrorf("truncate: err(%v)", err)
+		log.LogErrorf("truncate: ino(%v) size(%v) err(%v)", inode, size, err)
 		return
 	}
 

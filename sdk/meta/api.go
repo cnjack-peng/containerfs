@@ -281,14 +281,14 @@ func (mw *MetaWrapper) GetExtents(inode uint64) (gen uint64, size uint64, extent
 	return gen, size, extents, nil
 }
 
-func (mw *MetaWrapper) Truncate(inode uint64) error {
+func (mw *MetaWrapper) Truncate(inode, size uint64) error {
 	mp := mw.getPartitionByInode(inode)
 	if mp == nil {
 		log.LogErrorf("Truncate: No inode partition, ino(%v)", inode)
 		return syscall.ENOENT
 	}
 
-	status, err := mw.truncate(mp, inode)
+	status, err := mw.truncate(mp, inode, size)
 	if err != nil || status != statusOK {
 		return statusToErrno(status)
 	}
