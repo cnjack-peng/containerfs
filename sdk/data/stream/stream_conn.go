@@ -16,7 +16,7 @@ var (
 )
 
 const (
-	StreamSendMaxRetry      = 100
+	StreamSendMaxRetry      = 200
 	StreamSendSleepInterval = 100 * time.Millisecond
 )
 
@@ -72,7 +72,7 @@ func (sc *StreamConn) sendToPartition(req *Packet, getReply GetReplyFunc) (err e
 	}
 
 	for _, addr := range sc.hosts {
-		log.LogWarnf("sendToPartition: try addr(%v) req(%v)", addr, req)
+		log.LogWarnf("sendToPartition: try addr(%v) reqPacket(%v)", addr, req)
 		conn, err = StreamConnPool.Get(addr)
 		if err != nil {
 			log.LogWarnf("sendToPartition: failed to get connection to addr(%v) reqPacket(%v) err(%v)", addr, req, err)

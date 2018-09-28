@@ -252,8 +252,6 @@ func (sw *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error) {
 		reqPacket.Size = uint32(packSize)
 		reqPacket.Crc = crc32.ChecksumIEEE(reqPacket.Data[:packSize])
 
-		log.LogDebugf("doRewrite: packSize(%v) req(%v) reqPacket(%v)", packSize, req, reqPacket)
-
 		replyPacket := new(Packet)
 		err = sc.Send(reqPacket, func(conn *net.TCPConn) (error, bool) {
 			e := replyPacket.ReadFromConn(conn, proto.ReadDeadlineTime)
@@ -271,8 +269,10 @@ func (sw *StreamWriter) doRewrite(req *ExtentRequest) (total int, err error) {
 			return e, false
 		})
 
+		log.LogDebugf("doRewrite: ino(%v) req(%v) reqPacket(%v) err(%v) replyPacket(%v)", sw.Inode, req, reqPacket, err, replyPacket)
+
 		if err != nil || replyPacket.ResultCode != proto.OpOk {
-			err = errors.Annotatef(err, "doRewrite failed or NOK: ino(%v) req(%v) replyPacket(%v)", sw.Inode, req, replyPacket)
+			err = errors.New(fmt.Sprintf("doRewrite: failed or reply NOK: err(%v) ino(%v) req(%v) replyPacket(%v)", err, sw.Inode, req, replyPacket))
 			break
 		}
 
