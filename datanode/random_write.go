@@ -158,7 +158,7 @@ func (dp *dataPartition) RandomPartitionReadCheck(request *Packet, connect net.C
 		return
 	}
 
-	if dp.applyId+1 < dp.raftPartition.CommittedIndex() {
+	if dp.applyId+2 < dp.raftPartition.CommittedIndex() {
 		//err = storage.ErrorAgain
 		log.LogErrorf("[readCheck] read ErrorAgain partition=%v dp applyId=%v committedId=%v raftApplied=%v",
 			dp.partitionId, dp.applyId, dp.raftPartition.CommittedIndex(), dp.raftPartition.AppliedIndex())
