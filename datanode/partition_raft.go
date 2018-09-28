@@ -518,11 +518,11 @@ func (dp *dataPartition) getMinAppliedId() {
 	minAppliedId = dp.applyId
 	for i := 0; i < len(dp.replicaHosts); i++ {
 		var conn *net.TCPConn
-		leaderAddrParts := strings.Split(leaderAddr, ":")
-		leader := strings.TrimSpace(leaderAddrParts[0])
-		if leader == LocalIP {
-			log.LogDebugf("[getMinAppliedId] partition=%v lead not send msg. localIp[%v] leader=[%v]",
-				dp.partitionId, LocalIP, leaderAddr)
+		replicaHostParts := strings.Split(dp.replicaHosts[i], ":")
+		replicaHost := strings.TrimSpace(replicaHostParts[0])
+		if LocalIP == replicaHost {
+			log.LogDebugf("[getMinAppliedId] partition=%v leader not send msg to self. localIp[%v] replicaHost leader=[%v]",
+				dp.partitionId, LocalIP, replicaHost, leaderAddr)
 			continue
 		}
 
