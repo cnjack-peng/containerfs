@@ -496,7 +496,7 @@ func (dp *dataPartition) getMinAppliedId() {
 	}
 
 	if dp.applyId == 0 {
-		log.LogDebugf("[getMinAppliedId] partition=%v leader no apply. commit=%v", dp.raftPartition.CommittedIndex())
+		log.LogDebugf("[getMinAppliedId] partition=%v leader no apply. commit=%v", dp.partitionId, dp.raftPartition.CommittedIndex())
 		return
 	}
 
@@ -521,7 +521,7 @@ func (dp *dataPartition) getMinAppliedId() {
 		replicaHostParts := strings.Split(dp.replicaHosts[i], ":")
 		replicaHost := strings.TrimSpace(replicaHostParts[0])
 		if LocalIP == replicaHost {
-			log.LogDebugf("[getMinAppliedId] partition=%v leader not send msg to self. localIp[%v] replicaHost leader=[%v]",
+			log.LogDebugf("[getMinAppliedId] partition=%v leader not send msg to self. localIp[%v] replicaHost[%v] leader=[%v]",
 				dp.partitionId, LocalIP, replicaHost, leaderAddr)
 			continue
 		}
