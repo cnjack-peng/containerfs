@@ -18,12 +18,14 @@ import (
 	"container/list"
 	"fmt"
 	"time"
+	"strings"
 
 	"github.com/juju/errors"
 	"github.com/tiglabs/containerfs/proto"
 	"github.com/tiglabs/containerfs/storage"
 	"github.com/tiglabs/containerfs/util"
 	"github.com/tiglabs/containerfs/util/log"
+	"github.com/tiglabs/raft"
 )
 
 func (s *DataNode) readFromCliAndDeal(msgH *MessageHandler) (err error) {
@@ -128,6 +130,11 @@ func (s *DataNode) randomOpReq(pkg *Packet, msgH *MessageHandler) {
 	}
 
 	err = pkg.DataPartition.RandomWriteSubmit(pkg)
+	if err != nil && strings.Contains(err.Error(), raft.ErrNotLeader.Error()) {
+		err = storage.ErrNotLeader
+		return
+	}
+
 	if err == nil && pkg.Opcode == proto.OpRandomWrite && pkg.Size == util.BlockSize {
 		proto.Buffers.Put(pkg.Data)
 	}
