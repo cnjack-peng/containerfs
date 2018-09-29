@@ -23,7 +23,7 @@ import (
 
 // Error definitions for raft store partition.
 var (
-	ErrNotLeader = errors.New("not leader")
+	ErrNotLeader = errors.New("not raft leader")
 )
 
 // PartitionStatus is a type alias of raft.Status
