@@ -1,3 +1,4 @@
+//from https://github.com/hashicorp/raft.git thanks
 package simplelru
 
 import "sync"
