@@ -67,39 +67,21 @@ func NewExtentClient(volname, master string, appendExtentKey AppendExtentKeyFunc
 
 //TODO: delay stream writer init in GetStreamWriter
 func (client *ExtentClient) OpenStream(inode uint64) error {
+	extents := NewExtentCache()
+	err := extents.Refresh(inode, client.getExtents)
+	if err != nil {
+		return err
+	}
+
 	client.streamerLock.Lock()
 	stream, ok := client.streamers[inode]
 	if !ok {
 		stream = NewStreamer(client, inode)
 	}
-
 	stream.refcnt++
-
-	if stream.writer != nil {
-		client.streamerLock.Unlock()
-		return nil
-	}
-	stream.writer = NewStreamWriter(stream, inode)
 	client.streamers[inode] = stream
+	stream.extents = extents
 	client.streamerLock.Unlock()
-
-	extents := NewExtentCache()
-	err := extents.Refresh(inode, client.getExtents)
-
-	client.streamerLock.Lock()
-	if err != nil {
-		stream.refcnt--
-		if stream.refcnt == 0 {
-			delete(client.streamers, inode)
-		}
-	} else {
-		stream.extents = extents
-	}
-	client.streamerLock.Unlock()
-
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -146,10 +128,10 @@ func (client *ExtentClient) GetFileSize(inode uint64) (size int, gen uint64) {
 }
 
 func (client *ExtentClient) Write(inode uint64, offset int, data []byte) (write int, err error) {
-	stream := client.getStreamWriter(inode)
-	if stream == nil {
+	sw := client.getStreamWriter(inode)
+	if sw == nil {
 		prefix := fmt.Sprintf("inodewrite %v_%v_%v", inode, offset, len(data))
-		return 0, fmt.Errorf("Prefix(%v) cannot init write stream", prefix)
+		return 0, fmt.Errorf("Prefix(%v) cannot init StreamWriter", prefix)
 	}
 
 	request := writeRequestPool.Get().(*WriteRequest)
@@ -157,7 +139,7 @@ func (client *ExtentClient) Write(inode uint64, offset int, data []byte) (write 
 	request.kernelOffset = offset
 	request.size = len(data)
 	request.done = make(chan struct{}, 1)
-	stream.requestCh <- request
+	sw.requestCh <- request
 	<-request.done
 	err = request.err
 	write = request.canWrite
@@ -172,11 +154,11 @@ func (client *ExtentClient) Write(inode uint64, offset int, data []byte) (write 
 }
 
 func (client *ExtentClient) Flush(inode uint64) error {
-	stream := client.getStreamWriter(inode)
-	if stream == nil {
+	sw := client.getStreamWriter(inode)
+	if sw == nil {
 		return nil
 	}
-	return stream.Flush()
+	return sw.Flush()
 }
 
 func (client *ExtentClient) Read(inode uint64, data []byte, offset int, size int) (read int, err error) {
@@ -189,11 +171,9 @@ func (client *ExtentClient) Read(inode uint64, data []byte, offset int, size int
 		return
 	}
 
-	writer := client.getStreamWriter(inode)
-	if writer != nil {
-		if err = writer.Flush(); err != nil {
-			return
-		}
+	err = client.Flush(inode)
+	if err != nil {
+		return
 	}
 
 	read, err = stream.read(data, offset, size)
@@ -216,6 +196,9 @@ func (client *ExtentClient) getStreamWriter(inode uint64) *StreamWriter {
 	stream, ok := client.streamers[inode]
 	if !ok {
 		return nil
+	}
+	if stream.writer == nil {
+		stream.writer = NewStreamWriter(stream, inode)
 	}
 	return stream.writer
 }
